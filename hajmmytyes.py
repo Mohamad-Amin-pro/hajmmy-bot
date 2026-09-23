@@ -112,7 +112,7 @@ LOTTERY_DAYS = 7
 PET_FEED_PRICE = 500
 PET_MAX_LEVEL = 10
 
-SKIP_OLD_UPDATES = True
+SKIP_OLD_UPDATES = False
 
 NUMERIC_FIELDS = [
     "money", "flour", "chickpeas", "oil", "cheese", "spice",
