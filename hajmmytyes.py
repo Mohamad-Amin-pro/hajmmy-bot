@@ -1,10 +1,23 @@
 # -*- coding: utf-8 -*-
-"""🍔 ربات فلافل فروشی — نسخه 0.2.0"""
+"""🍔 ربات فلافل فروشی — نسخه 0.3.0 (PostgreSQL + SQLite)"""
 
-import requests, psycopg2, time, random, json, sys, traceback, re, os
-from psycopg2.extras import RealDictCursor
+import requests, time, random, json, sys, traceback, re, os, threading
 from datetime import datetime, date, timedelta
 from flask import Flask
+
+try:
+    import sqlite3
+except ImportError:
+    sqlite3 = None
+
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    psycopg2 = None
+    RealDictCursor = None
+    PSYCOPG2_AVAILABLE = False
 
 try:
     import zoneinfo
@@ -43,24 +56,34 @@ def run_web():
     web_app.run(host="0.0.0.0", port=port)
 
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 SOURCE_NAME = "🍔 ربات فلافل فروشی"
 
-TOKEN = "1131920555:EEdqeY1B2U3DPX0gTrS4lQ0LjfKHsDOlrx0"
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
+TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BASE_URL = os.environ.get("BASE_URL", f"https://tapi.bale.ai/bot{TOKEN}/")
 DB_PATH = "falafel_game.db"
-DEBUG = True
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DEBUG = os.environ.get("DEBUG", "true").lower() == "true"
+
+# تشخیص نوع دیتابیس
+USE_POSTGRES = bool(DATABASE_URL) and PSYCOPG2_AVAILABLE
+if USE_POSTGRES:
+    print("✅ استفاده از PostgreSQL")
+else:
+    print("⚠️ استفاده از SQLite (محلی)")
 
 CONNECT_TIMEOUT = 30
 READ_TIMEOUT = 60
 POLLING_TIMEOUT = 20
 MAX_RETRIES = 3
 RETRY_DELAY = 3
-MAX_MESSAGE_AGE = 120  # پیام‌های قدیمی‌تر از ۲ دقیقه نادیده گرفته شن
+MAX_MESSAGE_AGE = 120
 
-ADMIN_IDS = [ 201919317]
-FORCED_CHANNEL = "@falaflihajmmy"
-FORCED_CHANNEL_TITLE = "کانال ما"
+ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", "1355544502,201919317")
+ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()]
+
+FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "@falaflihajmmy")
+FORCED_CHANNEL_TITLE = os.environ.get("FORCED_CHANNEL_TITLE", "کانال ما")
 
 FORCED_CHANNEL_NORM = None
 _join_cache = {}
@@ -68,8 +91,8 @@ JOIN_CACHE_TTL = 300
 _join_pm_sent = {}
 JOIN_PM_COOLDOWN = 300
 
-CARD_NUMBER = "6037-XXXX-XXXX-XXXX"
-CARD_OWNER = "نام صاحب کارت"
+CARD_NUMBER = os.environ.get("CARD_NUMBER", "6037-XXXX-XXXX-XXXX")
+CARD_OWNER = os.environ.get("CARD_OWNER", "نام صاحب کارت")
 
 SHOP_PACKAGES = {
     "small":  {"name": "🟢 بسته کوچک",  "coins": 50000,   "price": 50000},
@@ -81,7 +104,6 @@ SHOP_PACKAGES = {
 BANK_DAILY_PROFIT = 0.20
 BANK_MIN_INVEST = 1000
 BANK_MAX_BALANCE = 10000000
-
 BOX_PRICE = 2000
 ADMIN_MONEY_LIMIT = 100000
 TRANSFER_MIN = 500
@@ -96,7 +118,7 @@ PET_FEED_PRICE = 500
 PET_MAX_LEVEL = 10
 SLOT_MIN = 1000
 SLOT_MAX = 50000
-SKIP_OLD_UPDATES = True
+SKIP_OLD_UPDATES = False
 
 NUMERIC_FIELDS = [
     "money", "gems", "flour", "chickpeas", "oil", "cheese", "spice",
@@ -116,8 +138,7 @@ def normalize_numbers(text):
     if not text:
         return text
     text = text.translate(PERSIAN_DIGITS)
-    text = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    return text
+    return text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
 
 
 def is_admin(uid):
@@ -149,6 +170,11 @@ def log(*a):
 def log_err():
     if DEBUG:
         traceback.print_exc()
+
+
+def ph():
+    """Placeholder برای پارامتر در کوئری."""
+    return "%s" if USE_POSTGRES else "?"
 
 
 # ==================== API ====================
@@ -225,82 +251,15 @@ def answer_callback(cb_id, text=None, alert=False):
     return api("answerCallbackQuery", p)
 
 
-# ==================== کیبوردها ====================
-def kb(rows):
-    return {"keyboard": [[{"text": t} for t in row] for row in rows], "resize_keyboard": True}
-
-
-def PRIVATE_KB(uid=None):
-    rows = [
-        ["🛒 فروشگاه", "🏦 بانک"],
-        ["🎰 کازینو", "🎰 اسلات"],
-        ["🎫 لاتاری", "🎁 جعبه"],
-        ["🎓 مهارت‌ها", "🐔 پت"],
-        ["⚡ بوستر", "💎 الماس"],
-        ["💳 کارت به کارت", "🔔 یادآور"],
-        ["📖 راهنما", "👤 پروفایل من"],
-        ["💳 خریدهای من"],
-    ]
-    if uid and is_admin(uid):
-        rows.append(["👑 پنل ادمین"])
-    return kb(rows)
-
-
-def ADMIN_KB():
-    return kb([
-        ["📥 سفارشات", "📊 آمار کل"],
-        ["💰 افزودن پول", "💳 کارت به کارت ادمین"],
-        ["🎁 هدیه همگانی", "🎟 کد تخفیف"],
-        ["📢 پیام همگانی", "🗑 ریست کلی"],
-        ["🔙 بازگشت"]
-    ])
-
-
-def BANK_KB():
-    return kb([["🏦 موجودی", "📊 راهنما"], ["🔙 بازگشت"]])
-
-
-def GROUP_KB():
-    return {"inline_keyboard": [
-        [{"text": "🛒 خرید", "callback_data": "g:buy"}, {"text": "🍳 آشپزی", "callback_data": "g:cook"}],
-        [{"text": "💰 فروش", "callback_data": "g:sell"}, {"text": "🎁 جایزه", "callback_data": "g:daily"}],
-        [{"text": "🎰 گردونه", "callback_data": "g:spin"}, {"text": "🎰 اسلات", "callback_data": "g:slot"}],
-        [{"text": "⚙️ آپگرید", "callback_data": "g:up"}, {"text": "🏦 بانک", "callback_data": "g:bank"}],
-        [{"text": "🏰 کلن", "callback_data": "g:clan"}, {"text": "⚔️ دوئل", "callback_data": "g:duel"}],
-        [{"text": "🎯 ماموریت", "callback_data": "g:mission"}, {"text": "👤 پروفایل", "callback_data": "g:me"}],
-        [{"text": "🏆 رتبه", "callback_data": "g:top"}, {"text": "❌ بستن", "callback_data": "g:close"}],
-    ]}
-
-
-GUIDES = {
-    "buy": "🛒 *خرید*\n\n`خرید آرد ۵`\n`خرید نخود ۳`\n`خرید روغن ۲`\n`خرید پنیر ۳`\n`خرید ادویه ۳`\n\n💡 می‌تونی چندتایی توی یه پیام بفرستی:\n`خرید آرد ۱۰`\\n`خرید نخود ۵`",
-    "cook": "🍳 *آشپزی*\n\n`آشپزی ساده` 🟡\n`آشپزی حرفه‌ای` 🟠\n`آشپزی ساندویچ` 🥙\n`آشپزی پنیری` 🧀\n`آشپزی تند` 🌶\n`آشپزی دلوکس` 👑",
-    "sell": "💰 *فروش*\n\n`فروش همه`\n`فروش ساده` | `فروش مخصوص`\n`فروش ساندویچ` | `فروش پنیری`\n`فروش تند` | `فروش دلوکس`",
-    "daily": "🎁 *جایزه روزانه*\n\n`جایزه روزانه`",
-    "spin": "🎰 *گردونه*\n\n`گردونه شانس`",
-    "up": "⚙️ *آپگرید*\n\n`آپگرید تنور` 🔥\n`آپگرید مخلوط‌کن` 🥣\n`آپگرید پیشخوان` 🏪",
-    "me": "👤 *پروفایل*\n\n`پروفایل`",
-    "top": "🏆 *رتبه*\n\n`رتبه`",
-    "cust": "🔔 *مشتری*\n\n`مشتری` | `تحویل بده`",
-    "clan": "🏰 *کلن*\n\n`کلن بساز [اسم]`\n`کلن عضو شو [اسم]`\n`کلن من`\n`کلن لیست`\n`کلن اهدا ۵۰۰۰`\n`کلن خروج`",
-    "duel": "⚔️ *دوئل*\n\nروی پیام حریف ریپلای کن:\n`دوئل ۵۰۰۰`",
-    "mission": "🎯 *ماموریت*\n\n`ماموریت`",
-    "bank": "🏦 *بانک*\n\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n`بانک سرمایه ۵۰۰۰`\n`بانک جمع`",
-    "casino": "🎰 *کازینو*\n\n`کازینو ۵۰۰۰ شیر`\n`کازینو ۵۰۰۰ خط`",
-    "slot": "🎰 *اسلات*\n\n`اسلات ۵۰۰۰`\n\n💡 شانس جکپات!",
-    "boost": "⚡ *بوستر*\n\n`بوستر بخر` — ۵,۰۰۰",
-    "lottery": "🎫 *لاتاری*\n\n`لاتاری` — پنل\n`لاتاری بخر`",
-    "skills": "🎓 *مهارت*\n\n`مهارت‌ها`\n`مهارت بخر cook`",
-    "pet": "🐔 *پت*\n\n`پت`\n`پت بخر`\n`پت غذا بده`",
-    "gems": "💎 *فروشگاه الماس*\n\n`الماس` — پنل\n`الماس بخر [آیتم]`",
-}
-
-
-# ==================== DB ====================
+# ==================== دیتابیس ====================
 def db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if USE_POSTGRES:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        return conn
+    else:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def close(conn):
@@ -310,91 +269,98 @@ def close(conn):
         pass
 
 
+def _t_serial():
+    return "BIGSERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+
+def _t_real():
+    return "DOUBLE PRECISION" if USE_POSTGRES else "REAL"
+
+
+def _t_int_pk():
+    return "BIGINT PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY"
+
+
 def init_db():
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("""CREATE TABLE IF NOT EXISTS players (
-            user_id INTEGER PRIMARY KEY, first_name TEXT, username TEXT,
-            money INTEGER DEFAULT 5000, gems INTEGER DEFAULT 0,
-            flour INTEGER DEFAULT 10, chickpeas INTEGER DEFAULT 10,
-            oil INTEGER DEFAULT 10, cheese INTEGER DEFAULT 0, spice INTEGER DEFAULT 0,
-            falafel_simple INTEGER DEFAULT 0, falafel_special INTEGER DEFAULT 0,
-            falafel_sandwich INTEGER DEFAULT 0, falafel_cheese INTEGER DEFAULT 0,
-            falafel_spicy INTEGER DEFAULT 0, falafel_deluxe INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0,
-            oven_level INTEGER DEFAULT 0, mixer_level INTEGER DEFAULT 0,
-            counter_level INTEGER DEFAULT 0,
-            skill_cook INTEGER DEFAULT 0, skill_trade INTEGER DEFAULT 0,
-            skill_luck INTEGER DEFAULT 0, skill_charm INTEGER DEFAULT 0,
-            pet_level INTEGER DEFAULT 0, pet_exp INTEGER DEFAULT 0, pet_hunger INTEGER DEFAULT 100,
-            win_streak INTEGER DEFAULT 0, best_streak INTEGER DEFAULT 0,
-            total_sold INTEGER DEFAULT 0, total_earned INTEGER DEFAULT 0,
-            total_cooked INTEGER DEFAULT 0, last_daily REAL DEFAULT 0,
-            daily_streak INTEGER DEFAULT 0, last_spin REAL DEFAULT 0,
-            active_customer TEXT DEFAULT '', customer_expire REAL DEFAULT 0,
-            customer_order TEXT DEFAULT '', customer_reward INTEGER DEFAULT 0,
-            last_slot REAL DEFAULT 0, created_at REAL)""")
-        for t in [
-            "CREATE TABLE IF NOT EXISTS achievements (user_id INTEGER, achievement_id TEXT, unlocked_at REAL, PRIMARY KEY (user_id, achievement_id))",
-            "CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, amount INTEGER, description TEXT, ts REAL)",
-            "CREATE TABLE IF NOT EXISTS shop_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, package_key TEXT, coins INTEGER, price INTEGER, receipt_file_id TEXT DEFAULT '', tracking_code TEXT DEFAULT '', status TEXT DEFAULT 'pending', created_at REAL, reviewed_by INTEGER DEFAULT 0, reviewed_at REAL, note TEXT DEFAULT '')",
-            "CREATE TABLE IF NOT EXISTS user_states (user_id INTEGER PRIMARY KEY, state TEXT, data TEXT)",
-            "CREATE TABLE IF NOT EXISTS clans (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, owner_id INTEGER, treasury INTEGER DEFAULT 0, points INTEGER DEFAULT 0, created_at REAL)",
-            "CREATE TABLE IF NOT EXISTS clan_members (clan_id INTEGER, user_id INTEGER PRIMARY KEY, joined_at REAL)",
-            "CREATE TABLE IF NOT EXISTS duels (id INTEGER PRIMARY KEY AUTOINCREMENT, challenger_id INTEGER, opponent_id INTEGER, amount INTEGER, winner_id INTEGER, ts REAL)",
-            "CREATE TABLE IF NOT EXISTS daily_missions (user_id INTEGER, day TEXT, missions TEXT, completed TEXT, PRIMARY KEY (user_id, day))",
-            "CREATE TABLE IF NOT EXISTS daily_quests (user_id INTEGER, day TEXT, quests TEXT, completed TEXT, PRIMARY KEY (user_id, day))",
-            "CREATE TABLE IF NOT EXISTS admin_txns (id INTEGER PRIMARY KEY AUTOINCREMENT, target_id INTEGER, admin_id INTEGER, amount INTEGER, note TEXT, reversed INTEGER DEFAULT 0, ts REAL)",
-            "CREATE TABLE IF NOT EXISTS banks (user_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0, invested INTEGER DEFAULT 0, last_collect REAL DEFAULT 0, total_profit INTEGER DEFAULT 0, last_invest REAL DEFAULT 0)",
-            "CREATE TABLE IF NOT EXISTS casino_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, result TEXT, bet_type TEXT, ts REAL)",
-            "CREATE TABLE IF NOT EXISTS card_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER, receiver_id INTEGER, amount INTEGER, commission INTEGER, note TEXT, ts REAL)",
-            "CREATE TABLE IF NOT EXISTS discount_codes (code TEXT PRIMARY KEY, amount INTEGER, max_uses INTEGER DEFAULT 1, uses INTEGER DEFAULT 0, created_by INTEGER, created_at REAL, used_by TEXT DEFAULT '[]')",
-            "CREATE TABLE IF NOT EXISTS boosters (user_id INTEGER PRIMARY KEY, multiplier REAL DEFAULT 2.0, expires_at REAL DEFAULT 0, bought_at REAL DEFAULT 0)",
-            "CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, chat_id INTEGER, text TEXT, remind_at REAL, created_at REAL)",
-            "CREATE TABLE IF NOT EXISTS lottery (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, tickets INTEGER DEFAULT 0, week TEXT, joined_at REAL)",
-            "CREATE TABLE IF NOT EXISTS lottery_winners (id INTEGER PRIMARY KEY AUTOINCREMENT, week TEXT, user_id INTEGER, tickets INTEGER, prize INTEGER, paid INTEGER DEFAULT 0, ts REAL)",
+        tables = [
+            f"""CREATE TABLE IF NOT EXISTS players (
+                user_id {_t_int_pk()}, first_name TEXT, username TEXT,
+                money INTEGER DEFAULT 5000, gems INTEGER DEFAULT 0,
+                flour INTEGER DEFAULT 10, chickpeas INTEGER DEFAULT 10,
+                oil INTEGER DEFAULT 10, cheese INTEGER DEFAULT 0, spice INTEGER DEFAULT 0,
+                falafel_simple INTEGER DEFAULT 0, falafel_special INTEGER DEFAULT 0,
+                falafel_sandwich INTEGER DEFAULT 0, falafel_cheese INTEGER DEFAULT 0,
+                falafel_spicy INTEGER DEFAULT 0, falafel_deluxe INTEGER DEFAULT 0,
+                level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0,
+                oven_level INTEGER DEFAULT 0, mixer_level INTEGER DEFAULT 0,
+                counter_level INTEGER DEFAULT 0,
+                skill_cook INTEGER DEFAULT 0, skill_trade INTEGER DEFAULT 0,
+                skill_luck INTEGER DEFAULT 0, skill_charm INTEGER DEFAULT 0,
+                pet_level INTEGER DEFAULT 0, pet_exp INTEGER DEFAULT 0, pet_hunger INTEGER DEFAULT 100,
+                win_streak INTEGER DEFAULT 0, best_streak INTEGER DEFAULT 0,
+                total_sold INTEGER DEFAULT 0, total_earned INTEGER DEFAULT 0,
+                total_cooked INTEGER DEFAULT 0, last_daily {_t_real()} DEFAULT 0,
+                daily_streak INTEGER DEFAULT 0, last_spin {_t_real()} DEFAULT 0,
+                active_customer TEXT DEFAULT '', customer_expire {_t_real()} DEFAULT 0,
+                customer_order TEXT DEFAULT '', customer_reward INTEGER DEFAULT 0,
+                last_slot {_t_real()} DEFAULT 0, created_at {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS achievements (
+                user_id BIGINT, achievement_id TEXT, unlocked_at {_t_real()},
+                PRIMARY KEY (user_id, achievement_id))""",
+            f"""CREATE TABLE IF NOT EXISTS transactions (
+                id {_t_serial()}, user_id BIGINT, type TEXT,
+                amount INTEGER, description TEXT, ts {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS shop_orders (
+                id {_t_serial()}, user_id BIGINT, package_key TEXT, coins INTEGER, price INTEGER,
+                receipt_file_id TEXT DEFAULT '', tracking_code TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending', created_at {_t_real()},
+                reviewed_by BIGINT DEFAULT 0, reviewed_at {_t_real()}, note TEXT DEFAULT '')""",
+            "CREATE TABLE IF NOT EXISTS user_states (user_id BIGINT PRIMARY KEY, state TEXT, data TEXT)",
+            f"""CREATE TABLE IF NOT EXISTS clans (
+                id {_t_serial()}, name TEXT UNIQUE, owner_id BIGINT, treasury INTEGER DEFAULT 0,
+                points INTEGER DEFAULT 0, created_at {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS clan_members (
+                clan_id BIGINT, user_id BIGINT PRIMARY KEY, joined_at {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS duels (
+                id {_t_serial()}, challenger_id BIGINT, opponent_id BIGINT, amount INTEGER,
+                winner_id BIGINT, ts {_t_real()})""",
+            "CREATE TABLE IF NOT EXISTS daily_missions (user_id BIGINT, day TEXT, missions TEXT, completed TEXT, PRIMARY KEY (user_id, day))",
+            f"""CREATE TABLE IF NOT EXISTS admin_txns (
+                id {_t_serial()}, target_id BIGINT, admin_id BIGINT, amount INTEGER,
+                note TEXT, reversed INTEGER DEFAULT 0, ts {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS banks (
+                user_id BIGINT PRIMARY KEY, balance INTEGER DEFAULT 0, invested INTEGER DEFAULT 0,
+                last_collect {_t_real()} DEFAULT 0, total_profit INTEGER DEFAULT 0, last_invest {_t_real()} DEFAULT 0)""",
+            f"""CREATE TABLE IF NOT EXISTS casino_log (
+                id {_t_serial()}, user_id BIGINT, amount INTEGER, result TEXT, bet_type TEXT, ts {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS card_transfers (
+                id {_t_serial()}, sender_id BIGINT, receiver_id BIGINT, amount INTEGER,
+                commission INTEGER, note TEXT, ts {_t_real()})""",
+            "CREATE TABLE IF NOT EXISTS discount_codes (code TEXT PRIMARY KEY, amount INTEGER, max_uses INTEGER DEFAULT 1, uses INTEGER DEFAULT 0, created_by BIGINT, created_at DOUBLE PRECISION, used_by TEXT DEFAULT '[]')",
+            f"""CREATE TABLE IF NOT EXISTS boosters (
+                user_id BIGINT PRIMARY KEY, multiplier {_t_real()} DEFAULT 2.0,
+                expires_at {_t_real()} DEFAULT 0, bought_at {_t_real()} DEFAULT 0)""",
+            f"""CREATE TABLE IF NOT EXISTS reminders (
+                id {_t_serial()}, user_id BIGINT, chat_id BIGINT, text TEXT,
+                remind_at {_t_real()}, created_at {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS lottery (
+                id {_t_serial()}, user_id BIGINT, tickets INTEGER DEFAULT 0,
+                week TEXT, joined_at {_t_real()})""",
+            f"""CREATE TABLE IF NOT EXISTS lottery_winners (
+                id {_t_serial()}, week TEXT, user_id BIGINT, tickets INTEGER,
+                prize INTEGER, paid INTEGER DEFAULT 0, ts {_t_real()})""",
             "CREATE TABLE IF NOT EXISTS daily_events (day TEXT PRIMARY KEY, event_type TEXT, description TEXT)",
-            "CREATE TABLE IF NOT EXISTS gems_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, reason TEXT, ts REAL)",
-        ]:
-            c.execute(t)
-        conn.commit()
-
-        # migrations
-        migrations = [
-            ("players", "gems", "INTEGER DEFAULT 0"),
-            ("players", "skill_cook", "INTEGER DEFAULT 0"),
-            ("players", "skill_trade", "INTEGER DEFAULT 0"),
-            ("players", "skill_luck", "INTEGER DEFAULT 0"),
-            ("players", "skill_charm", "INTEGER DEFAULT 0"),
-            ("players", "pet_level", "INTEGER DEFAULT 0"),
-            ("players", "pet_exp", "INTEGER DEFAULT 0"),
-            ("players", "pet_hunger", "INTEGER DEFAULT 100"),
-            ("players", "win_streak", "INTEGER DEFAULT 0"),
-            ("players", "best_streak", "INTEGER DEFAULT 0"),
-            ("players", "last_slot", "REAL DEFAULT 0"),
-            ("banks", "last_invest", "REAL DEFAULT 0"),
+            f"""CREATE TABLE IF NOT EXISTS gems_log (
+                id {_t_serial()}, user_id BIGINT, amount INTEGER, reason TEXT, ts {_t_real()})""",
         ]
-        for table, col, dtype in migrations:
+        for t in tables:
             try:
-                c.execute(f"SELECT {col} FROM {table} LIMIT 1")
-            except Exception:
-                try:
-                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {dtype}")
-                    conn.commit()
-                except Exception:
-                    pass
-
-        for field in NUMERIC_FIELDS:
-            try:
-                c.execute(f"UPDATE players SET {field}=0 WHERE {field} IS NULL")
-            except Exception:
-                pass
-        for field in ["balance", "invested", "last_collect", "total_profit", "last_invest"]:
-            try:
-                c.execute(f"UPDATE banks SET {field}=0 WHERE {field} IS NULL")
-            except Exception:
-                pass
+                c.execute(t)
+            except Exception as e:
+                log(f"⚠️ Table error: {e}")
         conn.commit()
     finally:
         close(conn)
@@ -492,7 +458,7 @@ def get_player(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM players WHERE user_id=?", (uid,))
+        c.execute(f"SELECT * FROM players WHERE user_id={ph()}", (uid,))
         r = c.fetchone()
         if not r:
             return None
@@ -515,9 +481,12 @@ def create_player(uid, fn="کاربر", un=""):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO players (user_id, first_name, username, created_at) VALUES (?,?,?,?)",
+        c.execute(f"INSERT INTO players (user_id, first_name, username, created_at) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id) DO NOTHING" if USE_POSTGRES else
+                  "INSERT OR IGNORE INTO players (user_id, first_name, username, created_at) VALUES (?,?,?,?)",
                   (uid, fn, un, time.time()))
         conn.commit()
+    except Exception as e:
+        log(f"⚠️ create_player error: {e}")
     finally:
         close(conn)
 
@@ -528,10 +497,12 @@ def update_player(uid, **kw):
     conn = db()
     try:
         c = conn.cursor()
-        fields = ", ".join([f"{k}=?" for k in kw.keys()])
+        fields = ", ".join([f"{k}={ph()}" for k in kw.keys()])
         vals = list(kw.values()) + [uid]
-        c.execute(f"UPDATE players SET {fields} WHERE user_id=?", vals)
+        c.execute(f"UPDATE players SET {fields} WHERE user_id={ph()}", vals)
         conn.commit()
+    except Exception as e:
+        log(f"⚠️ update_player error: {e}")
     finally:
         close(conn)
 
@@ -540,9 +511,11 @@ def log_txn(uid, type_, amount, desc):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO transactions (user_id, type, amount, description, ts) VALUES (?,?,?,?,?)",
+        c.execute(f"INSERT INTO transactions (user_id, type, amount, description, ts) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
                   (uid, type_, amount, desc, time.time()))
         conn.commit()
+    except Exception as e:
+        log(f"⚠️ log_txn: {e}")
     finally:
         close(conn)
 
@@ -556,27 +529,32 @@ def add_gems(uid, amount, reason=""):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO gems_log (user_id, amount, reason, ts) VALUES (?,?,?,?)",
+        c.execute(f"INSERT INTO gems_log (user_id, amount, reason, ts) VALUES ({ph()},{ph()},{ph()},{ph()})",
                   (uid, amount, reason, time.time()))
         conn.commit()
+    except Exception:
+        pass
     finally:
         close(conn)
 
 
 def add_exp(uid, amount):
+    """🆕 رفع باگ: جلوگیری از منفی شدن و کرش"""
     p = get_player(uid)
     if not p:
         return None
+    if amount < 0:
+        amount = 0
     cook_skill = p.get("skill_cook", 0) or 0
     if cook_skill > 0:
         amount = int(amount * (1 + cook_skill * 0.03))
-    new_exp = p["exp"] + amount
-    new_level = p["level"]
+    new_exp = (p.get("exp", 0) or 0) + amount
+    new_level = p.get("level", 1) or 1
     while new_exp >= 100:
         new_exp -= 100
         new_level += 1
     update_player(uid, exp=new_exp, level=new_level)
-    if new_level > p["level"]:
+    if new_level > (p.get("level", 1) or 1):
         add_gems(uid, 1, f"سطح {new_level}")
         return new_level
     return None
@@ -625,7 +603,7 @@ def get_active_booster(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT multiplier, expires_at FROM boosters WHERE user_id=?", (uid,))
+        c.execute(f"SELECT multiplier, expires_at FROM boosters WHERE user_id={ph()}", (uid,))
         r = c.fetchone()
         if not r:
             return 1.0
@@ -650,15 +628,17 @@ def get_today_event():
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT event_type FROM daily_events WHERE day=?", (today,))
+        c.execute(f"SELECT event_type FROM daily_events WHERE day={ph()}", (today,))
         r = c.fetchone()
         if r:
             return r["event_type"]
         event = random.choices(DAILY_EVENTS, weights=[15, 15, 15, 15, 40])[0]
-        c.execute("INSERT OR REPLACE INTO daily_events (day, event_type, description) VALUES (?,?,?)",
+        c.execute(f"INSERT INTO daily_events (day, event_type, description) VALUES ({ph()},{ph()},{ph()})",
                   (today, event[0], event[1]))
         conn.commit()
         return event[0]
+    except Exception:
+        return "normal"
     finally:
         close(conn)
 
@@ -676,7 +656,7 @@ def get_bank(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM banks WHERE user_id=?", (uid,))
+        c.execute(f"SELECT * FROM banks WHERE user_id={ph()}", (uid,))
         r = c.fetchone()
         if r:
             d = dict(r)
@@ -684,8 +664,11 @@ def get_bank(uid):
                 if d.get(k) is None:
                     d[k] = 0
             return d
-        c.execute("INSERT OR IGNORE INTO banks (user_id) VALUES (?)", (uid,))
-        conn.commit()
+        try:
+            c.execute(f"INSERT INTO banks (user_id) VALUES ({ph()})", (uid,))
+            conn.commit()
+        except Exception:
+            pass
         return {"user_id": uid, "balance": 0, "invested": 0, "last_collect": 0, "total_profit": 0, "last_invest": 0}
     finally:
         close(conn)
@@ -697,11 +680,12 @@ def update_bank(uid, **kw):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO banks (user_id) VALUES (?)", (uid,))
-        fields = ", ".join([f"{k}=?" for k in kw.keys()])
+        fields = ", ".join([f"{k}={ph()}" for k in kw.keys()])
         vals = list(kw.values()) + [uid]
-        c.execute(f"UPDATE banks SET {fields} WHERE user_id=?", vals)
+        c.execute(f"UPDATE banks SET {fields} WHERE user_id={ph()}", vals)
         conn.commit()
+    except Exception as e:
+        log(f"⚠️ update_bank: {e}")
     finally:
         close(conn)
 
@@ -816,7 +800,6 @@ def do_casino(uid, chat_id, amount, bet_type):
         correct = True
         result = bet_type
     if correct:
-        update_player(uid, money=p["money"] + amount)
         new_streak = (p.get("win_streak", 0) or 0) + 1
         best = max(p.get("best_streak", 0) or 0, new_streak)
         bonus = min(new_streak, 5) * 100
@@ -826,8 +809,7 @@ def do_casino(uid, chat_id, amount, bet_type):
         extra = f"\n🔥 استریک: {new_streak}" + (f" (+{bonus})" if bonus > 0 else "")
         send_message(chat_id,
                      f"🎰 *کازینو*\n💰 {format_money(amount)} — {bet_type}\n🎲 *{result}*\n\n"
-                     f"🎉 بردی! +{format_money(amount + bonus)}{extra}",
-                     safe=False)
+                     f"🎉 بردی! +{format_money(amount + bonus)}{extra}", safe=False)
     else:
         update_player(uid, money=p["money"] - amount, win_streak=0)
         log_txn(uid, "casino_lose", -amount, "باخت کازینو")
@@ -847,7 +829,6 @@ def do_slot(uid, chat_id, amount):
     weights = [s[1] for s in SLOT_SYMBOLS]
     reels = [random.choices(SLOT_SYMBOLS, weights=weights)[0] for _ in range(3)]
     symbols = [r[0] for r in reels]
-    # محاسبه برد
     win = 0
     msg_extra = ""
     if symbols[0] == symbols[1] == symbols[2]:
@@ -865,15 +846,13 @@ def do_slot(uid, chat_id, amount):
         log_txn(uid, "slot_win", win, "برد اسلات")
         send_message(chat_id,
                      f"🎰 *اسلات*\n┃ {symbols[0]} ┃ {symbols[1]} ┃ {symbols[2]} ┃\n\n"
-                     f"{msg_extra}\n💰 +{format_money(win)}",
-                     safe=False)
+                     f"{msg_extra}\n💰 +{format_money(win)}", safe=False)
     else:
         update_player(uid, money=p["money"] - amount)
         log_txn(uid, "slot_lose", -amount, "باخت اسلات")
         send_message(chat_id,
                      f"🎰 *اسلات*\n┃ {symbols[0]} ┃ {symbols[1]} ┃ {symbols[2]} ┃\n\n"
-                     f"😢 باختی! -{format_money(amount)}",
-                     safe=False)
+                     f"😢 باختی! -{format_money(amount)}", safe=False)
 
 
 # ==================== Box ====================
@@ -910,14 +889,19 @@ def do_booster(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT expires_at FROM boosters WHERE user_id=?", (uid,))
+        c.execute(f"SELECT expires_at FROM boosters WHERE user_id={ph()}", (uid,))
         r = c.fetchone()
         if r and r["expires_at"] and time.time() < r["expires_at"]:
             left = int((r["expires_at"] - time.time()) // 60)
             send_message(chat_id, f"⚡ بوستر فعالت {left} دقیقه دیگه!")
             return
-        c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
-                  (uid, BOOSTER_MULTIPLIER, time.time() + BOOSTER_DURATION, time.time()))
+        new_expires = time.time() + BOOSTER_DURATION
+        if USE_POSTGRES:
+            c.execute(f"INSERT INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id) DO UPDATE SET multiplier={ph()}, expires_at={ph()}, bought_at={ph()}",
+                      (uid, BOOSTER_MULTIPLIER, new_expires, time.time(), BOOSTER_MULTIPLIER, new_expires, time.time()))
+        else:
+            c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
+                      (uid, BOOSTER_MULTIPLIER, new_expires, time.time()))
         conn.commit()
     finally:
         close(conn)
@@ -929,7 +913,7 @@ def booster_status(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT expires_at, multiplier FROM boosters WHERE user_id=?", (uid,))
+        c.execute(f"SELECT expires_at, multiplier FROM boosters WHERE user_id={ph()}", (uid,))
         r = c.fetchone()
         if r and r["expires_at"] and time.time() < r["expires_at"]:
             left = int((r["expires_at"] - time.time()) // 60)
@@ -947,7 +931,7 @@ def do_reminder_set(uid, chat_id, text_body, seconds):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO reminders (user_id, chat_id, text, remind_at, created_at) VALUES (?,?,?,?,?)",
+        c.execute(f"INSERT INTO reminders (user_id, chat_id, text, remind_at, created_at) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
                   (uid, chat_id, text_body, time.time() + seconds, time.time()))
         conn.commit()
     finally:
@@ -959,7 +943,7 @@ def do_reminder_list(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT id, text, remind_at FROM reminders WHERE user_id=? ORDER BY remind_at ASC LIMIT 10", (uid,))
+        c.execute(f"SELECT id, text, remind_at FROM reminders WHERE user_id={ph()} ORDER BY remind_at ASC LIMIT 10", (uid,))
         rows = c.fetchall()
     finally:
         close(conn)
@@ -984,7 +968,7 @@ def get_lottery_tickets(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT tickets FROM lottery WHERE user_id=? AND week=?", (uid, week))
+        c.execute(f"SELECT tickets FROM lottery WHERE user_id={ph()} AND week={ph()}", (uid, week))
         r = c.fetchone()
         return r["tickets"] if r else 0
     finally:
@@ -1001,14 +985,14 @@ def do_lottery_buy(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT id FROM lottery WHERE user_id=? AND week=?", (uid, week))
+        c.execute(f"SELECT id FROM lottery WHERE user_id={ph()} AND week={ph()}", (uid, week))
         if c.fetchone():
-            c.execute("UPDATE lottery SET tickets=tickets+1 WHERE user_id=? AND week=?", (uid, week))
+            c.execute(f"UPDATE lottery SET tickets=tickets+1 WHERE user_id={ph()} AND week={ph()}", (uid, week))
         else:
-            c.execute("INSERT INTO lottery (user_id, tickets, week, joined_at) VALUES (?,?,?,?)",
+            c.execute(f"INSERT INTO lottery (user_id, tickets, week, joined_at) VALUES ({ph()},{ph()},{ph()},{ph()})",
                       (uid, 1, week, time.time()))
         conn.commit()
-        c.execute("SELECT tickets FROM lottery WHERE user_id=? AND week=?", (uid, week))
+        c.execute(f"SELECT tickets FROM lottery WHERE user_id={ph()} AND week={ph()}", (uid, week))
         total = c.fetchone()["tickets"]
     finally:
         close(conn)
@@ -1021,7 +1005,7 @@ def do_lottery_panel(uid, chat_id):
     try:
         c = conn.cursor()
         week = get_week_key()
-        c.execute("SELECT SUM(tickets) s FROM lottery WHERE week=?", (week,))
+        c.execute(f"SELECT SUM(tickets) s FROM lottery WHERE week={ph()}", (week,))
         total = c.fetchone()["s"] or 0
     finally:
         close(conn)
@@ -1041,10 +1025,10 @@ def draw_lottery():
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT week FROM lottery_winners WHERE week=?", (prev_week,))
+        c.execute(f"SELECT week FROM lottery_winners WHERE week={ph()}", (prev_week,))
         if c.fetchone():
             return
-        c.execute("SELECT user_id, tickets FROM lottery WHERE week=?", (prev_week,))
+        c.execute(f"SELECT user_id, tickets FROM lottery WHERE week={ph()}", (prev_week,))
         participants = c.fetchall()
         if not participants:
             return
@@ -1052,10 +1036,10 @@ def draw_lottery():
         for p in participants:
             pool.extend([p["user_id"]] * (p["tickets"] or 1))
         winner = random.choice(pool)
-        c.execute("SELECT SUM(tickets) s FROM lottery WHERE week=?", (prev_week,))
+        c.execute(f"SELECT SUM(tickets) s FROM lottery WHERE week={ph()}", (prev_week,))
         total = c.fetchone()["s"] or 0
         prize = total * LOTTERY_PRICE * 80 // 100
-        c.execute("INSERT INTO lottery_winners (week, user_id, tickets, prize, paid, ts) VALUES (?,?,?,?,1,?)",
+        c.execute(f"INSERT INTO lottery_winners (week, user_id, tickets, prize, paid, ts) VALUES ({ph()},{ph()},{ph()},{ph()},1,{ph()})",
                   (prev_week, winner, total, prize, time.time()))
         conn.commit()
     finally:
@@ -1176,8 +1160,13 @@ def do_gem_buy(uid, chat_id, key):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
-                      (uid, BOOSTER_MULTIPLIER, time.time() + BOOSTER_DURATION, time.time()))
+            new_expires = time.time() + BOOSTER_DURATION
+            if USE_POSTGRES:
+                c.execute(f"INSERT INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id) DO UPDATE SET multiplier={ph()}, expires_at={ph()}, bought_at={ph()}",
+                          (uid, BOOSTER_MULTIPLIER, new_expires, time.time(), BOOSTER_MULTIPLIER, new_expires, time.time()))
+            else:
+                c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
+                          (uid, BOOSTER_MULTIPLIER, new_expires, time.time()))
             conn.commit()
         finally:
             close(conn)
@@ -1187,7 +1176,7 @@ def do_gem_buy(uid, chat_id, key):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("DELETE FROM daily_missions WHERE user_id=? AND day=?", (uid, today))
+            c.execute(f"DELETE FROM daily_missions WHERE user_id={ph()} AND day={ph()}", (uid, today))
             conn.commit()
         finally:
             close(conn)
@@ -1196,8 +1185,13 @@ def do_gem_buy(uid, chat_id, key):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
-                      (uid, 1.5, time.time() + 600, time.time()))
+            new_expires = time.time() + 600
+            if USE_POSTGRES:
+                c.execute(f"INSERT INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id) DO UPDATE SET multiplier={ph()}, expires_at={ph()}, bought_at={ph()}",
+                          (uid, 1.5, new_expires, time.time(), 1.5, new_expires, time.time()))
+            else:
+                c.execute("INSERT OR REPLACE INTO boosters (user_id, multiplier, expires_at, bought_at) VALUES (?,?,?,?)",
+                          (uid, 1.5, new_expires, time.time()))
             conn.commit()
         finally:
             close(conn)
@@ -1216,7 +1210,7 @@ def check_ach(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT achievement_id FROM achievements WHERE user_id=?", (uid,))
+        c.execute(f"SELECT achievement_id FROM achievements WHERE user_id={ph()}", (uid,))
         have = {r["achievement_id"] for r in c.fetchall()}
         checks = [
             ("first_cook", p["total_cooked"] >= 1),
@@ -1238,8 +1232,12 @@ def check_ach(uid, chat_id):
         ]
         for aid, cond in checks:
             if cond and aid not in have:
-                c.execute("INSERT INTO achievements VALUES (?,?,?)", (uid, aid, time.time()))
-                conn.commit()
+                try:
+                    c.execute(f"INSERT INTO achievements (user_id, achievement_id, unlocked_at) VALUES ({ph()},{ph()},{ph()})",
+                              (uid, aid, time.time()))
+                    conn.commit()
+                except Exception:
+                    pass
                 reward = ACHIEVEMENTS[aid]["reward"]
                 p2 = get_player(uid)
                 update_player(uid, money=p2["money"] + reward)
@@ -1370,23 +1368,20 @@ def fulfill_customer(uid, chat_id):
 
 
 # ==================== Action Helpers ====================
-def do_buy(uid, chat_id, item, qty, silent=False):
+def do_buy(uid, chat_id, item, qty):
     p = get_player(uid)
     if item not in INGREDIENTS:
-        if not silent:
-            send_message(chat_id, "❌ آیتم نامعتبر.")
+        send_message(chat_id, "❌ آیتم نامعتبر.")
         return False
     price = ing_price(item, p["mixer_level"], p) * qty
     if p["money"] < price:
-        if not silent:
-            send_message(chat_id, f"❌ پول کافی نداری! نیاز: {format_money(price)}")
+        send_message(chat_id, f"❌ پول کافی نداری! نیاز: {format_money(price)}")
         return False
     have = p.get(item, 0) or 0
     update_player(uid, money=p["money"] - price, **{item: have + qty})
     log_txn(uid, "buy", -price, f"خرید {qty} {INGREDIENTS[item]['name']}")
     track_mission(uid, "buy", 1, chat_id)
-    if not silent:
-        send_message(chat_id, f"✅ {qty} {INGREDIENTS[item]['emoji']} {INGREDIENTS[item]['name']}\n💵 -{format_money(price)}\n📦 {have + qty}")
+    send_message(chat_id, f"✅ {qty} {INGREDIENTS[item]['emoji']} {INGREDIENTS[item]['name']}\n💵 -{format_money(price)}\n📦 {have + qty}")
     return True
 
 
@@ -1552,7 +1547,7 @@ def do_profile(uid, chat_id, first_name):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) c FROM achievements WHERE user_id=?", (uid,))
+        c.execute(f"SELECT COUNT(*) c FROM achievements WHERE user_id={ph()}", (uid,))
         ach = c.fetchone()["c"]
     finally:
         close(conn)
@@ -1627,7 +1622,7 @@ def get_clan_by_name(name):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM clans WHERE name=?", (name,))
+        c.execute(f"SELECT * FROM clans WHERE name={ph()}", (name,))
         r = c.fetchone()
         return dict(r) if r else None
     finally:
@@ -1638,19 +1633,9 @@ def get_user_clan(uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT c.* FROM clans c JOIN clan_members m ON c.id=m.clan_id WHERE m.user_id=?", (uid,))
+        c.execute(f"SELECT c.* FROM clans c JOIN clan_members m ON c.id=m.clan_id WHERE m.user_id={ph()}", (uid,))
         r = c.fetchone()
         return dict(r) if r else None
-    finally:
-        close(conn)
-
-
-def get_clan_members(clan_id):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT user_id FROM clan_members WHERE clan_id=?", (clan_id,))
-        return [r["user_id"] for r in c.fetchall()]
     finally:
         close(conn)
 
@@ -1669,9 +1654,12 @@ def do_clan_create(uid, chat_id, name):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO clans (name, owner_id, created_at) VALUES (?,?,?)", (name, uid, time.time()))
-        cid = c.lastrowid
-        c.execute("INSERT INTO clan_members (clan_id, user_id, joined_at) VALUES (?,?,?)", (cid, uid, time.time()))
+        c.execute(f"INSERT INTO clans (name, owner_id, created_at) VALUES ({ph()},{ph()},{ph()})",
+                  (name, uid, time.time()))
+        c.execute(f"SELECT id FROM clans WHERE name={ph()}", (name,))
+        cid = c.fetchone()["id"]
+        c.execute(f"INSERT INTO clan_members (clan_id, user_id, joined_at) VALUES ({ph()},{ph()},{ph()})",
+                  (cid, uid, time.time()))
         conn.commit()
     finally:
         close(conn)
@@ -1689,7 +1677,7 @@ def do_clan_join(uid, chat_id, name):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO clan_members (clan_id, user_id, joined_at) VALUES (?,?,?)",
+        c.execute(f"INSERT INTO clan_members (clan_id, user_id, joined_at) VALUES ({ph()},{ph()},{ph()})",
                   (clan["id"], uid, time.time()))
         conn.commit()
     finally:
@@ -1708,10 +1696,10 @@ def do_clan_leave(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("DELETE FROM clan_members WHERE user_id=?", (uid,))
-        c.execute("SELECT COUNT(*) as cnt FROM clan_members WHERE clan_id=?", (clan["id"],))
+        c.execute(f"DELETE FROM clan_members WHERE user_id={ph()}", (uid,))
+        c.execute(f"SELECT COUNT(*) as cnt FROM clan_members WHERE clan_id={ph()}", (clan["id"],))
         if c.fetchone()["cnt"] == 0:
-            c.execute("DELETE FROM clans WHERE id=?", (clan["id"],))
+            c.execute(f"DELETE FROM clans WHERE id={ph()}", (clan["id"],))
             send_message(chat_id, f"✅ خارج شدی. کلن حذف شد.")
         else:
             send_message(chat_id, f"✅ خارج شدی.")
@@ -1725,7 +1713,13 @@ def do_clan_info(uid, chat_id):
     if not clan:
         send_message(chat_id, "❌ توی کلنی نیستی.\n`کلن بساز [اسم]`")
         return
-    members = get_clan_members(clan["id"])
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT user_id FROM clan_members WHERE clan_id={ph()}", (clan["id"],))
+        members = [r["user_id"] for r in c.fetchall()]
+    finally:
+        close(conn)
     send_message(chat_id,
                  f"🏰 *کلن {clan['name']}*\n👑 مالک: `{clan['owner_id']}`\n"
                  f"👥 اعضا: {len(members)}\n💰 گنجینه: {format_money(clan['treasury'] or 0)}\n"
@@ -1744,7 +1738,7 @@ def do_clan_donate(uid, chat_id, amount):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("UPDATE clans SET treasury=treasury+?, points=points+? WHERE id=?",
+        c.execute(f"UPDATE clans SET treasury=treasury+{ph()}, points=points+{ph()} WHERE id={ph()}",
                   (amount, amount // 100, clan["id"]))
         conn.commit()
     finally:
@@ -1800,13 +1794,13 @@ def do_duel(challenger_id, chat_id, opponent_id, amount):
                  f"🏆 برنده: {wp['first_name']}\n💰 سود: {format_money(amount - tax)}", safe=False)
 
 
-# ==================== Missions & Quests ====================
+# ==================== Missions ====================
 def get_missions(uid):
     today = today_local().isoformat()
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT missions, completed FROM daily_missions WHERE user_id=? AND day=?", (uid, today))
+        c.execute(f"SELECT missions, completed FROM daily_missions WHERE user_id={ph()} AND day={ph()}", (uid, today))
         r = c.fetchone()
         if r:
             return json.loads(r["missions"]), json.loads(r["completed"])
@@ -1815,9 +1809,16 @@ def get_missions(uid):
             {"id": "sell", "title": "💰 فروش بگیر", "target": random.randint(3000, 12000), "reward": random.randint(1000, 2500), "progress": 0},
             {"id": "buy", "title": "🛒 مواد بخر", "target": random.randint(3, 10), "reward": random.randint(500, 1000), "progress": 0},
         ]
-        c.execute("INSERT OR REPLACE INTO daily_missions VALUES (?,?,?,?)",
-                  (uid, today, json.dumps(missions), json.dumps([])))
-        conn.commit()
+        try:
+            if USE_POSTGRES:
+                c.execute(f"INSERT INTO daily_missions (user_id, day, missions, completed) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id, day) DO NOTHING",
+                          (uid, today, json.dumps(missions), json.dumps([])))
+            else:
+                c.execute("INSERT OR REPLACE INTO daily_missions VALUES (?,?,?,?)",
+                          (uid, today, json.dumps(missions), json.dumps([])))
+            conn.commit()
+        except Exception:
+            pass
         return missions, []
     finally:
         close(conn)
@@ -1842,7 +1843,7 @@ def track_mission(uid, kind, value, chat_id):
             conn = db()
             try:
                 c = conn.cursor()
-                c.execute("UPDATE daily_missions SET missions=?, completed=? WHERE user_id=? AND day=?",
+                c.execute(f"UPDATE daily_missions SET missions={ph()}, completed={ph()} WHERE user_id={ph()} AND day={ph()}",
                           (json.dumps(missions), json.dumps(completed), uid, today))
                 conn.commit()
             finally:
@@ -1886,9 +1887,11 @@ def do_transfer(sender_id, chat_id, receiver_id, amount, sender_name="کاربر
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO card_transfers (sender_id, receiver_id, amount, commission, ts) VALUES (?,?,?,?,?)",
+        c.execute(f"INSERT INTO card_transfers (sender_id, receiver_id, amount, commission, ts) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
                   (sender_id, receiver_id, amount, commission, time.time()))
         conn.commit()
+    except Exception:
+        pass
     finally:
         close(conn)
     send_message(chat_id,
@@ -1915,13 +1918,14 @@ def do_admin_transfer(admin_id, chat_id, receiver_id, amount, note=""):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("INSERT INTO admin_txns (target_id, admin_id, amount, note, ts) VALUES (?,?,?,?,?)",
+        c.execute(f"INSERT INTO admin_txns (target_id, admin_id, amount, note, ts) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
                   (receiver_id, admin_id, amount, note or "کارت به کارت ادمین", time.time()))
-        txn_id = c.lastrowid
         conn.commit()
+    except Exception:
+        pass
     finally:
         close(conn)
-    send_message(chat_id, f"✅ به `{receiver_id}` {format_money(amount)}\n🆔 برگشت: `{txn_id}`", ADMIN_KB(), safe=False)
+    send_message(chat_id, f"✅ به `{receiver_id}` {format_money(amount)}", ADMIN_KB(), safe=False)
     try:
         send_message(receiver_id, f"💳 ادمین {format_money(amount)} بهت داد!")
     except Exception:
@@ -1952,7 +1956,7 @@ def do_admin_undo(txn_id, admin_id, chat_id):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM admin_txns WHERE id=?", (txn_id,))
+        c.execute(f"SELECT * FROM admin_txns WHERE id={ph()}", (txn_id,))
         r = c.fetchone()
         if not r:
             send_message(chat_id, "❌ نیست.", ADMIN_KB())
@@ -1966,7 +1970,7 @@ def do_admin_undo(txn_id, admin_id, chat_id):
             send_message(chat_id, "❌ کاربر نیست.", ADMIN_KB())
             return
         update_player(txn["target_id"], money=tp["money"] - txn["amount"])
-        c.execute("UPDATE admin_txns SET reversed=1 WHERE id=?", (txn_id,))
+        c.execute(f"UPDATE admin_txns SET reversed=1 WHERE id={ph()}", (txn_id,))
         conn.commit()
     finally:
         close(conn)
@@ -1980,10 +1984,13 @@ def do_reset_all(uid, chat_id):
     try:
         c = conn.cursor()
         for t in ["players", "achievements", "transactions", "shop_orders", "clans", "clan_members",
-                  "duels", "daily_missions", "daily_quests", "admin_txns", "banks", "user_states",
+                  "duels", "daily_missions", "admin_txns", "banks", "user_states",
                   "casino_log", "card_transfers", "discount_codes", "boosters", "reminders",
                   "lottery", "lottery_winners", "daily_events", "gems_log"]:
-            c.execute(f"DELETE FROM {t}")
+            try:
+                c.execute(f"DELETE FROM {t}")
+            except Exception:
+                pass
         conn.commit()
     finally:
         close(conn)
@@ -1998,7 +2005,7 @@ def do_redeem_code(uid, chat_id, code):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM discount_codes WHERE code=?", (code,))
+        c.execute(f"SELECT * FROM discount_codes WHERE code={ph()}", (code,))
         r = c.fetchone()
         if not r:
             send_message(chat_id, "❌ کد نیست!")
@@ -2018,7 +2025,7 @@ def do_redeem_code(uid, chat_id, code):
         amount = d["amount"] or 0
         update_player(uid, money=p["money"] + amount)
         used.append(uid)
-        c.execute("UPDATE discount_codes SET uses=uses+1, used_by=? WHERE code=?",
+        c.execute(f"UPDATE discount_codes SET uses=uses+1, used_by={ph()} WHERE code={ph()}",
                   (json.dumps(used), code))
         conn.commit()
     finally:
@@ -2036,11 +2043,11 @@ def do_admin_create_code(uid, chat_id, code, amount, max_uses=1):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT code FROM discount_codes WHERE code=?", (code,))
+        c.execute(f"SELECT code FROM discount_codes WHERE code={ph()}", (code,))
         if c.fetchone():
             send_message(chat_id, f"❌ وجود داره.", ADMIN_KB(), safe=False)
             return
-        c.execute("INSERT INTO discount_codes (code, amount, max_uses, created_by, created_at, used_by) VALUES (?,?,?,?,?,'[]')",
+        c.execute(f"INSERT INTO discount_codes (code, amount, max_uses, created_by, created_at, used_by) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()},'[]')",
                   (code, amount, max_uses, uid, time.time()))
         conn.commit()
     finally:
@@ -2101,7 +2108,6 @@ def parse_text_command(uid, chat_id, first_name, username, text):
         send_message(chat_id, "🛒 `خرید آرد ۵` | `خرید نخود ۳` | ...", safe=False)
         return True
 
-    # آشپزی
     if t.startswith("آشپزی") or t.startswith("بپز") or t.startswith("پخت"):
         if "ساندویچ" in t:
             do_cook(uid, chat_id, "sandwich"); return True
@@ -2118,7 +2124,6 @@ def parse_text_command(uid, chat_id, first_name, username, text):
         send_message(chat_id, "🍳 `آشپزی ساده` | `آشپزی حرفه‌ای` | ...", safe=False)
         return True
 
-    # فروش
     if t.startswith("فروش") or t.startswith("بفروش"):
         if "همه" in t or "کل" in t:
             do_sell(uid, chat_id, "all"); return True
@@ -2189,7 +2194,6 @@ def parse_text_command(uid, chat_id, first_name, username, text):
         return True
 
     if t.startswith("اسلات"):
-        body = t[5:].strip()
         amt = int(nums[0]) if nums else 0
         do_slot(uid, chat_id, amt); return True
 
@@ -2284,7 +2288,7 @@ def parse_text_command(uid, chat_id, first_name, username, text):
             else:
                 amt = int(nums_ct[0]); rid = int(nums_ct[1])
             do_transfer(uid, chat_id, rid, amt, first_name); return True
-        send_message(chat_id, "❌ `کارت به کارت ID مبلغ` یا روی پیام ریپلای کن."); return True
+        send_message(chat_id, "❌ `کارت به کارت ID مبلغ` یا ریپلای."); return True
 
     if t.startswith("کلن"):
         body = t[3:].strip()
@@ -2322,6 +2326,119 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     return False
 
 
+# ==================== Keyboards ====================
+def kb(rows):
+    return {"keyboard": [[{"text": t} for t in row] for row in rows], "resize_keyboard": True}
+
+
+def PRIVATE_KB(uid=None):
+    rows = [
+        ["🛒 فروشگاه", "🏦 بانک"],
+        ["🎰 کازینو", "🎰 اسلات"],
+        ["🎫 لاتاری", "🎁 جعبه"],
+        ["🎓 مهارت‌ها", "🐔 پت"],
+        ["⚡ بوستر", "💎 الماس"],
+        ["💳 کارت به کارت", "🔔 یادآور"],
+        ["📖 راهنما", "👤 پروفایل من"],
+        ["💳 خریدهای من"],
+    ]
+    if uid and is_admin(uid):
+        rows.append(["👑 پنل ادمین"])
+    return kb(rows)
+
+
+def ADMIN_KB():
+    return kb([
+        ["📥 سفارشات", "📊 آمار کل"],
+        ["💰 افزودن پول", "💳 کارت به کارت ادمین"],
+        ["🎁 هدیه همگانی", "🎟 کد تخفیف"],
+        ["📢 پیام همگانی", "🗑 ریست کلی"],
+        ["🔙 بازگشت"]
+    ])
+
+
+def BANK_KB():
+    return kb([["🏦 موجودی", "📊 راهنما"], ["🔙 بازگشت"]])
+
+
+def GROUP_KB():
+    return {"inline_keyboard": [
+        [{"text": "🛒 خرید", "callback_data": "g:buy"}, {"text": "🍳 آشپزی", "callback_data": "g:cook"}],
+        [{"text": "💰 فروش", "callback_data": "g:sell"}, {"text": "🎁 جایزه", "callback_data": "g:daily"}],
+        [{"text": "🎰 گردونه", "callback_data": "g:spin"}, {"text": "🎰 اسلات", "callback_data": "g:slot"}],
+        [{"text": "⚙️ آپگرید", "callback_data": "g:up"}, {"text": "🏦 بانک", "callback_data": "g:bank"}],
+        [{"text": "🏰 کلن", "callback_data": "g:clan"}, {"text": "⚔️ دوئل", "callback_data": "g:duel"}],
+        [{"text": "🎯 ماموریت", "callback_data": "g:mission"}, {"text": "👤 پروفایل", "callback_data": "g:me"}],
+        [{"text": "🏆 رتبه", "callback_data": "g:top"}, {"text": "❌ بستن", "callback_data": "g:close"}],
+    ]}
+
+
+GUIDES = {
+    "buy": "🛒 *خرید*\n\n`خرید آرد ۵`\n`خرید نخود ۳`\n`خرید روغن ۲`\n`خرید پنیر ۳`\n`خرید ادویه ۳`",
+    "cook": "🍳 *آشپزی*\n\n`آشپزی ساده` 🟡\n`آشپزی حرفه‌ای` 🟠\n`آشپزی ساندویچ` 🥙\n`آشپزی پنیری` 🧀\n`آشپزی تند` 🌶\n`آشپزی دلوکس` 👑",
+    "sell": "💰 *فروش*\n\n`فروش همه`\n`فروش ساده` | `فروش مخصوص`",
+    "daily": "🎁 *جایزه روزانه*\n\n`جایزه روزانه`",
+    "spin": "🎰 *گردونه*\n\n`گردونه شانس`",
+    "up": "⚙️ *آپگرید*\n\n`آپگرید تنور` 🔥\n`آپگرید مخلوط‌کن` 🥣\n`آپگرید پیشخوان` 🏪",
+    "me": "👤 *پروفایل*\n\n`پروفایل`",
+    "top": "🏆 *رتبه*\n\n`رتبه`",
+    "cust": "🔔 *مشتری*\n\n`مشتری` | `تحویل بده`",
+    "clan": "🏰 *کلن*\n\n`کلن بساز [اسم]`\n`کلن عضو شو [اسم]`\n`کلن من`\n`کلن لیست`\n`کلن اهدا ۵۰۰۰`\n`کلن خروج`",
+    "duel": "⚔️ *دوئل*\n\nروی پیام حریف ریپلای کن:\n`دوئل ۵۰۰۰`",
+    "mission": "🎯 *ماموریت*\n\n`ماموریت`",
+    "bank": "🏦 *بانک*\n\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n`بانک سرمایه ۵۰۰۰`\n`بانک جمع`",
+    "casino": "🎰 *کازینو*\n\n`کازینو ۵۰۰۰ شیر`\n`کازینو ۵۰۰۰ خط`",
+    "slot": "🎰 *اسلات*\n\n`اسلات ۵۰۰۰`",
+    "boost": "⚡ *بوستر*\n\n`بوستر بخر` — ۵,۰۰۰",
+    "lottery": "🎫 *لاتاری*\n\n`لاتاری` | `لاتاری بخر`",
+    "skills": "🎓 *مهارت*\n\n`مهارت‌ها`\n`مهارت بخر cook`",
+    "pet": "🐔 *پت*\n\n`پت` | `پت بخر` | `پت غذا بده`",
+    "gems": "💎 *فروشگاه الماس*\n\n`الماس`\n`الماس بخر booster`",
+}
+
+
+# ==================== State ====================
+def set_state(uid, state, data=""):
+    conn = db()
+    try:
+        c = conn.cursor()
+        if USE_POSTGRES:
+            c.execute(f"INSERT INTO user_states (user_id, state, data) VALUES ({ph()},{ph()},{ph()}) ON CONFLICT (user_id) DO UPDATE SET state={ph()}, data={ph()}",
+                      (uid, state, json.dumps(data), state, json.dumps(data)))
+        else:
+            c.execute("INSERT OR REPLACE INTO user_states VALUES (?,?,?)", (uid, state, json.dumps(data)))
+        conn.commit()
+    finally:
+        close(conn)
+
+
+def get_state(uid):
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT state, data FROM user_states WHERE user_id={ph()}", (uid,))
+        r = c.fetchone()
+        if not r:
+            return None, None
+        try:
+            data = json.loads(r["data"]) if r["data"] else None
+        except Exception:
+            data = r["data"]
+        return r["state"], data
+    finally:
+        close(conn)
+
+
+def clear_state(uid):
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"DELETE FROM user_states WHERE user_id={ph()}", (uid,))
+        conn.commit()
+    finally:
+        close(conn)
+
+
 # ==================== Private Handler ====================
 def handle_private(msg, uid, chat_id, first_name, username, text):
     if text == "/start":
@@ -2342,13 +2459,11 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
         create_player(uid, first_name, username)
     p = get_player(uid)
 
-    # /myid (همیشه)
     if text == "/myid":
         send_message(chat_id, f"🆔 `{uid}`", PRIVATE_KB(uid), safe=False); return
     if text == "/version":
-        send_message(chat_id, f"📦 `{VERSION}`", PRIVATE_KB(uid), safe=False); return
+        send_message(chat_id, f"📦 `{VERSION}`\n🗄 {'PostgreSQL' if USE_POSTGRES else 'SQLite'}", PRIVATE_KB(uid), safe=False); return
 
-    # /admin و /panel — پنل ادمین
     if text in ("/admin", "/panel", "👑 پنل ادمین"):
         if is_admin(uid):
             show_admin_panel(chat_id, uid)
@@ -2427,7 +2542,7 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("SELECT id, package_key, coins, status FROM shop_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10", (uid,))
+            c.execute(f"SELECT id, package_key, coins, status FROM shop_orders WHERE user_id={ph()} ORDER BY created_at DESC LIMIT 10", (uid,))
             rows = c.fetchall()
         finally:
             close(conn)
@@ -2443,16 +2558,14 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
     if text == "🔙 بازگشت":
         send_message(chat_id, "منوی اصلی:", PRIVATE_KB(uid)); return
 
-    # ادمین text handler
     if is_admin(uid) and handle_admin_text(chat_id, uid, text):
         return
 
-    # state
     state, data = get_state(uid)
     if state and handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
         return
 
-    # چندتایی
+    # 🆕 خرید چندتایی
     if "\n" in text:
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) >= 2:
@@ -2473,7 +2586,7 @@ def show_admin_panel(chat_id, uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) c FROM shop_orders WHERE status='pending'")
+        c.execute(f"SELECT COUNT(*) c FROM shop_orders WHERE status={ph()}", ("pending",))
         pending = c.fetchone()["c"]
         c.execute("SELECT COUNT(*) c FROM players")
         tp = c.fetchone()["c"]
@@ -2484,7 +2597,8 @@ def show_admin_panel(chat_id, uid):
     finally:
         close(conn)
     send_message(chat_id,
-                 f"👑 *پنل ادمین*\n━━━━━━━━━━━━━━━\n"
+                 f"👑 *پنل ادمین* ({'PostgreSQL' if USE_POSTGRES else 'SQLite'})\n"
+                 f"━━━━━━━━━━━━━━━\n"
                  f"📥 سفارشات: {pending}\n"
                  f"👥 بازیکن‌ها: {tp}\n"
                  f"💰 مجموع پول: {format_money(total_money)}\n"
@@ -2504,7 +2618,7 @@ def show_pending_orders(chat_id, uid):
     conn = db()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM shop_orders WHERE status='pending' ORDER BY created_at DESC LIMIT 10")
+        c.execute(f"SELECT * FROM shop_orders WHERE status={ph()} ORDER BY created_at DESC LIMIT 10", ("pending",))
         rows = c.fetchall()
     finally:
         close(conn)
@@ -2566,6 +2680,8 @@ def handle_admin_text(chat_id, uid, text):
         send_message(chat_id, "`GIFT مبلغ`", ADMIN_KB(), safe=False); return True
     if text == "📢 پیام همگانی":
         send_message(chat_id, "`ALL متن`", ADMIN_KB(), safe=False); return True
+    if text == "🔙 بازگشت":
+        send_message(chat_id, "منوی اصلی:", PRIVATE_KB(uid)); return True
 
     parts = text.split()
     if not parts:
@@ -2601,7 +2717,7 @@ def handle_admin_text(chat_id, uid, text):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("SELECT user_id, first_name, money FROM players WHERE first_name LIKE ? LIMIT 10", (f"%{q}%",))
+            c.execute(f"SELECT user_id, first_name, money FROM players WHERE first_name LIKE {ph()} LIMIT 10", (f"%{q}%",))
             rows = c.fetchall()
         finally:
             close(conn)
@@ -2622,15 +2738,15 @@ def handle_admin_text(chat_id, uid, text):
                                ("clan_members", "user_id"), ("user_states", "user_id"),
                                ("banks", "user_id"), ("boosters", "user_id"),
                                ("reminders", "user_id"), ("lottery", "user_id"),
-                               ("gems_log", "user_id"), ("daily_quests", "user_id")]:
+                               ("gems_log", "user_id")]:
                 try:
-                    c.execute(f"DELETE FROM {table} WHERE {col}=?", (tid,))
+                    c.execute(f"DELETE FROM {table} WHERE {col}={ph()}", (tid,))
                 except Exception:
                     pass
             try:
-                c.execute("DELETE FROM duels WHERE challenger_id=? OR opponent_id=?", (tid, tid))
-                c.execute("DELETE FROM admin_txns WHERE target_id=?", (tid,))
-                c.execute("DELETE FROM card_transfers WHERE sender_id=? OR receiver_id=?", (tid, tid))
+                c.execute(f"DELETE FROM duels WHERE challenger_id={ph()} OR opponent_id={ph()}", (tid, tid))
+                c.execute(f"DELETE FROM admin_txns WHERE target_id={ph()}", (tid,))
+                c.execute(f"DELETE FROM card_transfers WHERE sender_id={ph()} OR receiver_id={ph()}", (tid, tid))
             except Exception:
                 pass
             conn.commit()
@@ -2678,44 +2794,6 @@ def handle_admin_text(chat_id, uid, text):
     return False
 
 
-# ==================== State ====================
-def set_state(uid, state, data=""):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO user_states VALUES (?,?,?)", (uid, state, json.dumps(data)))
-        conn.commit()
-    finally:
-        close(conn)
-
-
-def get_state(uid):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT state, data FROM user_states WHERE user_id=?", (uid,))
-        r = c.fetchone()
-        if not r:
-            return None, None
-        try:
-            data = json.loads(r["data"]) if r["data"] else None
-        except Exception:
-            data = r["data"]
-        return r["state"], data
-    finally:
-        close(conn)
-
-
-def clear_state(uid):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute("DELETE FROM user_states WHERE user_id=?", (uid,))
-        conn.commit()
-    finally:
-        close(conn)
-
-
 def handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
     if state == "await_receipt":
         photos = msg.get("photo")
@@ -2726,9 +2804,10 @@ def handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("INSERT INTO shop_orders (user_id, package_key, coins, price, receipt_file_id, created_at) VALUES (?,?,?,?,?,?)",
+            c.execute(f"INSERT INTO shop_orders (user_id, package_key, coins, price, receipt_file_id, created_at) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()},{ph()})",
                       (uid, data.get("pkg"), pkg.get("coins", 0), pkg.get("price", 0), file_id, time.time()))
-            oid = c.lastrowid
+            c.execute(f"SELECT id FROM shop_orders WHERE user_id={ph()} ORDER BY id DESC LIMIT 1", (uid,))
+            oid = c.fetchone()["id"]
             conn.commit()
         finally:
             close(conn)
@@ -2741,8 +2820,8 @@ def handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("UPDATE shop_orders SET tracking_code=? WHERE id=?", (text.strip(), oid))
-            c.execute("SELECT * FROM shop_orders WHERE id=?", (oid,))
+            c.execute(f"UPDATE shop_orders SET tracking_code={ph()} WHERE id={ph()}", (text.strip(), oid))
+            c.execute(f"SELECT * FROM shop_orders WHERE id={ph()}", (oid,))
             order = dict(c.fetchone())
             conn.commit()
         finally:
@@ -2789,11 +2868,9 @@ def handle_group(msg, uid, chat_id, first_name, username, text):
         if text == "/version":
             send_message(chat_id, f"📦 `{VERSION}`", safe=False); return
         if text == "/help":
-            send_message(chat_id,
-                         "📋 `راهنما` رو بزن.", safe=False); return
+            send_message(chat_id, "📋 `راهنما` رو بزن.", safe=False); return
         return
 
-    # دوئل با ریپلای
     if text.startswith("دوئل") or text.startswith("مبارزه"):
         reply = msg.get("reply_to_message")
         if not reply:
@@ -2806,14 +2883,12 @@ def handle_group(msg, uid, chat_id, first_name, username, text):
             send_message(chat_id, "❌ مبلغ رو بنویس."); return
         do_duel(uid, chat_id, op_id, int(nums[0])); return
 
-    # کارت به کارت با ریپلای
     if text.startswith("انتقال") or text.startswith("کارت به کارت"):
         reply = msg.get("reply_to_message")
         nums = re.findall(r'\d+', normalize_numbers(text))
         if not nums:
             send_message(chat_id, "❌ مبلغ رو بنویس (مثال: `انتقال ۵۰۰۰`)"); return
         amount = int(nums[0])
-        # اگه ریپلای بود، از reply بگیر
         if reply:
             target_id = (reply.get("from") or {}).get("id")
         elif len(nums) >= 2:
@@ -2865,7 +2940,7 @@ def handle_callback(cb):
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("SELECT * FROM shop_orders WHERE id=?", (oid,))
+            c.execute(f"SELECT * FROM shop_orders WHERE id={ph()}", (oid,))
             r = c.fetchone()
             if not r:
                 answer_callback(cb["id"], "❌", True); return
@@ -2873,7 +2948,7 @@ def handle_callback(cb):
             if order["status"] != "pending":
                 answer_callback(cb["id"], "قبلاً بررسی شد.", True); return
             new_status = "approved" if is_appr else "rejected"
-            c.execute("UPDATE shop_orders SET status=?, reviewed_by=?, reviewed_at=? WHERE id=?",
+            c.execute(f"UPDATE shop_orders SET status={ph()}, reviewed_by={ph()}, reviewed_at={ph()} WHERE id={ph()}",
                       (new_status, uid, time.time(), oid))
             conn.commit()
         finally:
@@ -2977,19 +3052,16 @@ def is_message_too_old(msg, max_age=MAX_MESSAGE_AGE):
 def skip_old_updates():
     if not SKIP_OLD_UPDATES:
         return None
-    log("🧹 پاک‌سازی پیام‌های قدیمی...")
     try:
         r = api("getUpdates", {"offset": -1, "timeout": 0, "limit": 1}, req_timeout=(10, 15))
         if r.get("ok"):
             updates = r.get("result", [])
             if updates:
                 last_id = updates[-1]["update_id"]
-                # Flush everything up to last_id + 1
                 try:
                     api("getUpdates", {"offset": last_id + 1, "timeout": 0, "limit": 1}, req_timeout=(10, 15))
                 except Exception:
                     pass
-                log(f"🧹 آخرین update ID: {last_id}")
                 return last_id + 1
         return None
     except Exception as e:
@@ -3031,8 +3103,8 @@ def background_tasks():
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("SELECT user_id FROM players WHERE (active_customer='' OR customer_expire < ?) AND last_daily > ? LIMIT 5",
-                      (time.time(), time.time() - 3600))
+            c.execute(f"SELECT user_id FROM players WHERE (active_customer={ph()} OR customer_expire < {ph()}) AND last_daily > {ph()} LIMIT 5",
+                      ("", time.time(), time.time() - 3600))
             candidates = [r["user_id"] for r in c.fetchall()]
         finally:
             close(conn)
@@ -3045,14 +3117,17 @@ def background_tasks():
         conn = db()
         try:
             c = conn.cursor()
-            c.execute("SELECT id, chat_id, text FROM reminders WHERE remind_at <= ?", (time.time(),))
+            c.execute(f"SELECT id, chat_id, text FROM reminders WHERE remind_at <= {ph()}", (time.time(),))
             for r in c.fetchall():
                 try:
                     send_message(r["chat_id"], f"🔔 *یادآور:*\n{r['text']}")
                 except Exception:
                     pass
-                c.execute("DELETE FROM reminders WHERE id=?", (r["id"],))
-            c.execute("UPDATE players SET pet_hunger=MAX(0, pet_hunger-1) WHERE pet_level>0")
+                c.execute(f"DELETE FROM reminders WHERE id={ph()}", (r["id"],))
+            try:
+                c.execute(f"UPDATE players SET pet_hunger=pet_hunger-1 WHERE pet_level>0 AND pet_hunger>0")
+            except Exception:
+                pass
             conn.commit()
         finally:
             close(conn)
@@ -3071,6 +3146,7 @@ def run():
     print("━" * 55, flush=True)
     print(f"  {SOURCE_NAME}", flush=True)
     print(f"  📦 نسخه: {VERSION}", flush=True)
+    print(f"  🗄 دیتابیس: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}", flush=True)
     print(f"  🛠 حالت: {'Debug' if DEBUG else 'Production'}", flush=True)
     print("━" * 55, flush=True)
     log(f"👑 ادمین‌ها: {ADMIN_IDS}")
