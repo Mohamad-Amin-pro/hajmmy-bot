@@ -56,7 +56,7 @@ SOURCE_NAME = "🍔 ربات فلافل فروشی"
 
 # ==================== تنظیمات ====================
 TOKEN = ""
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/"
+BASE_URL = f"https://bale-proxy.habibi-app-company.workers.dev/bot{TOKEN}/"
 DB_PATH = "falafel_game.db"
 DEBUG = True
 
