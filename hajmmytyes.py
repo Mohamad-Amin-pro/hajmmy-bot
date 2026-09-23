@@ -55,7 +55,7 @@ VERSION = "0.1.0"
 SOURCE_NAME = "🍔 ربات فلافل فروشی"
 
 # ==================== تنظیمات ====================
-TOKEN = ""
+TOKEN = "1131920555:EEdqeY1B2U3DPX0gTrS4lQ0LjfKHsDOlrx0"
 BASE_URL = f"https://bale-proxy.habibi-app-company.workers.dev/bot{TOKEN}/"
 DB_PATH = "falafel_game.db"
 DEBUG = True
