@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """🍔 ربات فلافل فروشی — نسخه 0.2.0"""
 
-import requests, sqlite3, time, random, json, sys, traceback, re
-import threading, os
+import requests, psycopg2, time, random, json, sys, traceback, re, os
+from psycopg2.extras import RealDictCursor
 from datetime import datetime, date, timedelta
 from flask import Flask
 
@@ -58,7 +58,7 @@ MAX_RETRIES = 3
 RETRY_DELAY = 3
 MAX_MESSAGE_AGE = 120  # پیام‌های قدیمی‌تر از ۲ دقیقه نادیده گرفته شن
 
-ADMIN_IDS = [1355544502, 201919317]
+ADMIN_IDS = [ 201919317]
 FORCED_CHANNEL = "@falaflihajmmy"
 FORCED_CHANNEL_TITLE = "کانال ما"
 
