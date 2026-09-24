@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""🍔 ربات فلافل فروشی — نسخه 0.4.0 (بخش ۱ از ۲)"""
+"""🍔 ربات فلافل فروشی — نسخه 0.4.0/1 (بخش ۱ از ۲)"""
 
 import requests, time, random, json, sys, traceback, re, os, threading
 from datetime import datetime, date, timedelta
@@ -49,9 +49,9 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-VERSION = "0.4.0"
+VERSION = "0.4.0/1"
 SOURCE_NAME = "🍔 ربات فلافل فروشی"
-OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "@Mohamad_Amin_pro")  # ← یوزرنیم خودت
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "@Mohamad_Amin_pro")
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
 BASE_URL = os.environ.get("BASE_URL", f"https://tapi.bale.ai/bot{TOKEN}/")
@@ -93,11 +93,11 @@ SHOP_PACKAGES = {
 }
 
 VIP_LEVELS = {
-    "none":    {"name": "❌ بدون VIP", "mult": 1.0, "discount": 0.0, "energy_max": 100},
-    "bronze":  {"name": "🥉 برنزی", "mult": 1.2, "discount": 0.05, "energy_max": 150},
-    "silver":  {"name": "🥈 نقره‌ای", "mult": 1.5, "discount": 0.10, "energy_max": 200},
-    "gold":    {"name": "🥇 طلایی", "mult": 2.0, "discount": 0.15, "energy_max": 300},
-    "diamond": {"name": "💎 الماسی", "mult": 3.0, "discount": 0.25, "energy_max": 500},
+    "none":    {"name": "❌ بدون VIP", "mult": 1.0, "discount": 0.0},
+    "bronze":  {"name": "🥉 برنزی", "mult": 1.2, "discount": 0.05},
+    "silver":  {"name": "🥈 نقره‌ای", "mult": 1.5, "discount": 0.10},
+    "gold":    {"name": "🥇 طلایی", "mult": 2.0, "discount": 0.15},
+    "diamond": {"name": "💎 الماسی", "mult": 3.0, "discount": 0.25},
 }
 
 BADGES = {
@@ -141,9 +141,6 @@ PET_MAX_LEVEL = 10
 SLOT_MIN = 1000
 SLOT_MAX = 50000
 SKIP_OLD_UPDATES = False
-ENERGY_REFILL_COST = 500
-ENERGY_PER_ACTION = 5
-ENERGY_REFILL_MINUTES = 5
 
 REFERRAL_REWARD_REFERRER = 5000
 REFERRAL_REWARD_REFERRED = 2000
@@ -156,7 +153,7 @@ NUMERIC_FIELDS = [
     "skill_cook", "skill_trade", "skill_luck", "skill_charm",
     "pet_level", "pet_exp", "pet_hunger",
     "total_sold", "total_earned", "total_cooked", "daily_streak",
-    "win_streak", "best_streak", "energy",
+    "win_streak", "best_streak",
     "referrals_count", "referral_earnings", "duel_wins", "duel_losses",
     "shop_purchases", "boxes_opened", "vip_days_left",
 ]
@@ -192,7 +189,6 @@ def log_err():
 def ph():
     return "%s" if USE_POSTGRES else "?"
 
-# ==================== چک امنیتی ====================
 if not TOKEN and not os.environ.get("RUN_MODE") == "local":
     print("❌ خطا: BOT_TOKEN توی Env Vars ست نشده!")
     sys.exit(1)
@@ -256,7 +252,7 @@ def answer_callback(cb_id, text=None, alert=False):
     if text: p["text"] = text; p["show_alert"] = alert
     return api("answerCallbackQuery", p)
 
-# ==================== دیتابیس ====================
+# ==================== DB ====================
 def db():
     if USE_POSTGRES:
         return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -293,7 +289,6 @@ def init_db():
                 skill_luck INTEGER DEFAULT 0, skill_charm INTEGER DEFAULT 0,
                 pet_level INTEGER DEFAULT 0, pet_exp INTEGER DEFAULT 0, pet_hunger INTEGER DEFAULT 100,
                 win_streak INTEGER DEFAULT 0, best_streak INTEGER DEFAULT 0,
-                energy INTEGER DEFAULT 100, energy_updated {_t_real()} DEFAULT 0,
                 vip_level TEXT DEFAULT 'none', vip_expires {_t_real()} DEFAULT 0,
                 vip_days_left INTEGER DEFAULT 0,
                 referrals_count INTEGER DEFAULT 0, referral_earnings INTEGER DEFAULT 0,
@@ -373,7 +368,6 @@ def init_db():
             except Exception as e: log(f"⚠️ Table error: {e}")
         conn.commit()
 
-        # migrations
         new_cols = [
             ("players", "vip_level", "TEXT DEFAULT 'none'"),
             ("players", "vip_expires", "DOUBLE PRECISION DEFAULT 0"),
@@ -385,8 +379,6 @@ def init_db():
             ("players", "duel_losses", "INTEGER DEFAULT 0"),
             ("players", "shop_purchases", "INTEGER DEFAULT 0"),
             ("players", "boxes_opened", "INTEGER DEFAULT 0"),
-            ("players", "energy", "INTEGER DEFAULT 100"),
-            ("players", "energy_updated", "DOUBLE PRECISION DEFAULT 0"),
             ("players", "last_work", "DOUBLE PRECISION DEFAULT 0"),
         ]
         for tbl, col, dtype in new_cols:
@@ -488,7 +480,6 @@ GEM_SHOP = {
     "reroll":   {"name": "🎲 ریست ماموریت", "cost": 5, "desc": "ماموریت جدید"},
     "luck":     {"name": "🍀 شانس موقت", "cost": 15, "desc": "۱۰ دقیقه شانس بیشتر"},
     "streak_fix": {"name": "🔥 حفظ استریک", "cost": 20, "desc": "استریک شکسته رو برگردون"},
-    "energy":   {"name": "⚡ انرژی کامل", "cost": 5, "desc": "انرژی رو پر کن"},
 }
 
 # ==================== Player helpers ====================
@@ -502,7 +493,7 @@ def get_player(uid):
         d = dict(r)
         for k in NUMERIC_FIELDS:
             if d.get(k) is None: d[k] = 0
-        for k in ["last_daily", "last_spin", "customer_expire", "last_slot", "energy_updated", "last_work", "vip_expires"]:
+        for k in ["last_daily", "last_spin", "customer_expire", "last_slot", "last_work", "vip_expires"]:
             if d.get(k) is None: d[k] = 0
         for k in ["active_customer", "customer_order"]:
             if d.get(k) is None: d[k] = ""
@@ -647,16 +638,14 @@ def check_vip_status(uid):
 
 def buy_vip(uid, chat_id, vip_type, days):
     if vip_type not in VIP_LEVELS or vip_type == "none":
-        send_message(chat_id, "❌ نوع VIP نامعتبر")
-        return
+        send_message(chat_id, "❌ نوع VIP نامعتبر"); return
     p = get_player(uid)
     pkg_key = f"vip_{vip_type}"
     pkg = SHOP_PACKAGES.get(pkg_key)
     if not pkg: return
     price = pkg["price"]
     if p["money"] < price:
-        send_message(chat_id, f"❌ پول کافی نداری! نیاز: {format_money(price)}")
-        return
+        send_message(chat_id, f"❌ پول کافی نداری! نیاز: {format_money(price)}"); return
     now = time.time()
     current_expires = p.get("vip_expires", 0) or 0
     base_time = max(now, current_expires)
@@ -752,31 +741,6 @@ def get_me_username():
         _bot_username_cache = r["result"].get("username", "")
         return _bot_username_cache
     return None
-
-# ==================== Energy ====================
-def get_energy(uid):
-    p = get_player(uid)
-    if not p: return 0
-    max_e = VIP_LEVELS.get(p.get("vip_level", "none") or "none", VIP_LEVELS["none"])["energy_max"]
-    last = p.get("energy_updated", 0) or 0
-    now = time.time()
-    energy = p.get("energy", 100) or 0
-    if last > 0:
-        minutes = int((now - last) / 60)
-        regain = minutes // ENERGY_REFILL_MINUTES
-        if regain > 0:
-            energy = min(max_e, energy + regain)
-            update_player(uid, energy=energy, energy_updated=now - (minutes % ENERGY_REFILL_MINUTES) * 60)
-    else:
-        update_player(uid, energy_updated=now)
-    return energy
-
-def use_energy(uid, amount=ENERGY_PER_ACTION):
-    current = get_energy(uid)
-    if current < amount:
-        return False
-    update_player(uid, energy=current - amount)
-    return True
 
 # ==================== Badge ====================
 def check_badge(uid, chat_id, badge_id):
@@ -883,7 +847,6 @@ def collect_bank_profit(uid):
 def do_bank(uid, chat_id, first_name):
     profit = collect_bank_profit(uid)
     b = get_bank(uid)
-    p = get_player(uid)
     txt = (f"🏦 *بانک*\n━━━━━━━━━━━━━━━\n👤 {first_name}\n\n"
            f"💰 موجودی: {format_money(b['balance'])} تومان\n"
            f"📈 سرمایه: {format_money(b['invested'])} تومان\n"
@@ -1295,12 +1258,8 @@ def do_gem_buy(uid, chat_id, key):
     elif key == "streak_fix":
         update_player(uid, win_streak=1)
         send_message(chat_id, "🔥 استریک ریست شد!")
-    elif key == "energy":
-        max_e = VIP_LEVELS.get(p.get("vip_level", "none") or "none", VIP_LEVELS["none"])["energy_max"]
-        update_player(uid, energy=max_e, energy_updated=time.time())
-        send_message(chat_id, f"⚡ انرژی پر شد! ({max_e})")
 
-# ==================== دستاورد ====================
+# ==================== Achievements ====================
 def check_ach(uid, chat_id):
     p = get_player(uid)
     if not p: return
@@ -1454,8 +1413,6 @@ def do_cook(uid, chat_id, recipe):
     p = get_player(uid)
     if recipe not in RECIPES:
         send_message(chat_id, "❌ نامعتبر."); return
-    if not use_energy(uid):
-        send_message(chat_id, "⚡ انرژی کافی نداری! صبر کن یا از فروشگاه الماس بخر."); return
     r = RECIPES[recipe]
     missing = []
     for item, need in r["ing"].items():
@@ -1482,8 +1439,6 @@ def do_cook(uid, chat_id, recipe):
 
 def do_sell(uid, chat_id, target):
     p = get_player(uid)
-    if not use_energy(uid):
-        send_message(chat_id, "⚡ انرژی کافی نداری!"); return
     mult = get_total_multiplier(uid)
     extra = ""
     if is_weekend(): extra += "\n🎉 آخر هفته!"
@@ -1596,13 +1551,11 @@ def do_profile(uid, chat_id, first_name):
     pet_line = f"🐔 پت: سطح {p.get('pet_level', 0) or 0}" if (p.get("pet_level", 0) or 0) > 0 else ""
     tickets = get_lottery_tickets(uid)
     streak_line = f"🔥 استریک برد: {p.get('win_streak', 0) or 0}" if (p.get("win_streak", 0) or 0) > 0 else ""
-    energy = get_energy(uid)
     send_message(chat_id,
                  f"👤 *پروفایل {first_name}*\n━━━━━━━━━━━━━━━\n"
                  f"⭐ {p['level']} ({p['exp']}/100)\n"
                  f"💰 {format_money(p['money'])}\n"
                  f"💎 {p.get('gems', 0) or 0} الماس\n"
-                 f"⚡ {energy}/{VIP_LEVELS.get(vip, VIP_LEVELS['none'])['energy_max']}\n"
                  f"{vip_line}\n\n"
                  f"🏦 {format_money(b['balance'])}\n"
                  f"📈 {format_money(b['invested'])}\n\n"
@@ -1884,7 +1837,6 @@ def do_transfer(sender_id, chat_id, receiver_id, amount, sender_name="کاربر
     except: pass
 
 # ==================== State ====================
-
 def set_state(uid, state, data=""):
     conn = db()
     try:
@@ -1916,14 +1868,14 @@ def clear_state(uid):
         c.execute(f"DELETE FROM user_states WHERE user_id={ph()}", (uid,))
         conn.commit()
     finally: close(conn)
-# ==================== Parser ====================
+      # ==================== Parser ====================
 def parse_text_command(uid, chat_id, first_name, username, text):
     text = normalize_numbers(text)
     if text.startswith(("خرید", "بخر", "آشپزی", "بپز", "فروش", "بفروش", "جایزه", "گردونه",
                         "آپگرید", "مشتری", "تحویل", "کازینو", "اسلات", "جعبه",
                         "کارت", "انتقال", "بوستر", "کد", "لاتاری", "مهارت", "پت",
                         "هدیه", "الماس", "رتبه", "پروفایل", "فروشگاه", "دعوت", "نشان",
-                        "کار", "شغل", "انرژی", "وی‌آی‌پی", "vip")):
+                        "کار", "شغل", "وی‌آی‌پی", "vip")):
         if not check_user_cooldown(uid):
             return True
     p = get_player(uid)
@@ -2054,13 +2006,6 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     if t.startswith("کار") or t.startswith("شغل"):
         do_work(uid, chat_id); return True
 
-    if t.startswith("انرژی"):
-        p2 = get_player(uid)
-        e = get_energy(uid)
-        max_e = VIP_LEVELS.get(p2.get("vip_level", "none") or "none", VIP_LEVELS["none"])["energy_max"]
-        send_message(chat_id, f"⚡ انرژی: {e}/{max_e}\n\n`الماس بخر energy` — پر کردن با ۵ الماس")
-        return True
-
     if t.startswith("هدیه"):
         nums_h = re.findall(r'\d+', t)
         if len(nums_h) >= 2:
@@ -2142,7 +2087,7 @@ def parse_text_command(uid, chat_id, first_name, username, text):
                      "🎫 `لاتاری` | 🎓 `مهارت‌ها` | 🐔 `پت`\n"
                      "💎 `الماس` | ⚡ `بوستر بخر` | 🎁 `جعبه`\n"
                      "🛍 `فروشگاه` | 👥 `دعوت` | 🏅 `نشان‌ها`\n"
-                     "💼 `کار` | ⚡ `انرژی`\n"
+                     "💼 `کار`\n"
                      "💳 `کارت به کارت ID مبلغ` (یا ریپلای)\n"
                      "🎟 `کد WELCOME` | 🏰 `کلن بساز [اسم]`\n"
                      "⚔️ ریپلای + `دوئل ۵۰۰۰`\n\n"
@@ -2160,8 +2105,6 @@ def do_work(uid, chat_id):
     if now - last < 3600:
         m = int((3600 - (now - last)) // 60)
         send_message(chat_id, f"⏰ {m} دقیقه دیگه می‌تونی کار کنی"); return
-    if not use_energy(uid):
-        send_message(chat_id, "⚡ انرژی کافی نداری!"); return
     base = random.randint(500, 2000)
     bonus = int(base * (p.get("level", 1) or 1) * 0.1)
     total = base + bonus
@@ -2178,7 +2121,7 @@ def do_work(uid, chat_id):
     check_ach(uid, chat_id)
 
 
-# ==================== VIP Panel ====================
+# ==================== Shop Panel ====================
 def shop_panel(uid, chat_id):
     txt = "🛍 *فروشگاه*\n━━━━━━━━━━━━━━━\n\n"
     txt += "💡 *برای خرید، روی دکمه زیر بزن و به پیوی مالک پیام بده*\n\n"
@@ -2209,9 +2152,8 @@ def PRIVATE_KB(uid=None):
         ["⚡ بوستر", "💎 الماس"],
         ["💎 VIP", "👥 دعوت"],
         ["🏅 نشان‌ها", "💼 کار"],
-        ["⚡ انرژی", "💳 کارت به کارت"],
-        ["📖 راهنما", "👤 پروفایل من"],
-        ["💳 خریدهای من"],
+        ["💳 کارت به کارت", "📖 راهنما"],
+        ["👤 پروفایل من", "💳 خریدهای من"],
     ]
     if uid and is_admin(uid):
         rows.append(["👑 پنل ادمین"])
@@ -2271,7 +2213,6 @@ GUIDES = {
     "ref": "👥 *دعوت*\n\n`دعوت` — لینک دعوتت رو بگیر",
     "badges": "🏅 *نشان‌ها*\n\n`نشان‌ها` — لیست نشان‌ها",
     "work": "💼 *کار*\n\n`کار` — هر ۱ ساعت، یه بار",
-    "energy": "⚡ *انرژی*\n\n`انرژی` — وضعیت انرژی\n`الماس بخر energy` — پر کردن با ۵ الماس",
 }
 
 
@@ -2308,7 +2249,7 @@ def handle_admin_text(chat_id, uid, text):
                      ADMIN_KB(), safe=False)
         return True
     if text == "💰 افزودن پول":
-        send_message(chat_id, "`ADDMONEY ID مبلغ` (تا ۱۰۰,۰۰۰)\n`ADDMONEY ID مبلغ vip` برای VIP", ADMIN_KB(), safe=False)
+        send_message(chat_id, "`ADDMONEY ID مبلغ` (تا ۱۰۰,۰۰۰)", ADMIN_KB(), safe=False)
         return True
     if text == "💳 کارت به کارت ادمین":
         send_message(chat_id, "`CARD ID مبلغ` (تا ۱۰۰,۰۰۰)", ADMIN_KB(), safe=False); return True
@@ -2571,7 +2512,6 @@ def do_admin_list_codes(uid, chat_id):
 
 # ==================== Private Handler ====================
 def handle_private(msg, uid, chat_id, first_name, username, text):
-    # عضویت اجباری - چک اول
     if text == "/start":
         clear_join_cache(uid)
     if text == "/cancel":
@@ -2592,7 +2532,6 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
         create_player(uid, first_name, username)
     p = get_player(uid)
 
-    # پارس کردن start برای رفرال
     if text.startswith("/start"):
         parts = text.split()
         if len(parts) > 1 and parts[1].startswith("ref_"):
@@ -2623,8 +2562,7 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
                      f"خوش اومدی به ربات *فلافل فروشی*!{event_line}\n\n"
                      f"🎮 بازی: من رو به گروه اضافه کن و `/game` بزن!\n\n"
                      f"🆕 *قابلیت‌های جدید نسخه {VERSION}:*\n"
-                     f"💎 VIP، 🛍 فروشگاه، 👥 دعوت، 🏅 نشان‌ها\n"
-                     f"💼 کار، ⚡ انرژی، 📊 فصل‌ها\n\n"
+                     f"💎 VIP، 🛍 فروشگاه، 👥 دعوت، 🏅 نشان‌ها، 💼 کار\n\n"
                      f"از منوی پایین شروع کن 👇",
                      PRIVATE_KB(uid), safe=False)
         return
@@ -2637,7 +2575,6 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
                      "📋 دستورات کامل: توی گروه `راهنما`", PRIVATE_KB(uid), safe=False)
         return
 
-    # دکمه‌های منو
     if text in ("🏦 بانک", "/bank"): do_bank(uid, chat_id, first_name); return
     if text == "📊 راهنما":
         send_message(chat_id,
@@ -2659,11 +2596,6 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
     if text == "👥 دعوت": referral_panel(uid, chat_id); return
     if text == "🏅 نشان‌ها": badges_panel(uid, chat_id); return
     if text == "💼 کار": do_work(uid, chat_id); return
-    if text == "⚡ انرژی":
-        e = get_energy(uid)
-        max_e = VIP_LEVELS.get(p.get("vip_level", "none") or "none", VIP_LEVELS["none"])["energy_max"]
-        send_message(chat_id, f"⚡ انرژی: {e}/{max_e}\n\n`الماس بخر energy` — پر کردن با ۵ الماس", PRIVATE_KB(uid))
-        return
     if text == "🛍 فروشگاه": shop_panel(uid, chat_id); return
     if text == "🔔 یادآور":
         send_message(chat_id, "🔔 `یادآور ۱۰m جلسه` | `یادآور لیست`", PRIVATE_KB(uid)); return
@@ -2702,7 +2634,6 @@ def handle_private(msg, uid, chat_id, first_name, username, text):
     if state and handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
         return
 
-    # خرید چندتایی
     if "\n" in text:
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) >= 2:
@@ -2838,7 +2769,6 @@ def notify_admins_order(order, uid, first_name):
 
 # ==================== Group Handler ====================
 def handle_group(msg, uid, chat_id, first_name, username, text):
-    # عضویت اجباری - چک اول
     if not is_joined(uid):
         send_join_pm(uid, first_name)
         return
@@ -3127,4 +3057,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    run()  
