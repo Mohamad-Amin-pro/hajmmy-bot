@@ -59,7 +59,7 @@ def run_web():
 VERSION = "0.3.0"
 SOURCE_NAME = "🍔 ربات فلافل فروشی"
 
-TOKEN = os.environ.get("BOT_TOKEN", "1131920555:EEdqeY1B2U3DPX0gTrS4lQ0LjfKHsDOlrx0")
+TOKEN = os.environ.get("BOT_TOKEN", "")
 BASE_URL = os.environ.get("BASE_URL", f"https://tapi.bale.ai/bot{TOKEN}/")
 DB_PATH = "falafel_game.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -79,11 +79,24 @@ MAX_RETRIES = 3
 RETRY_DELAY = 3
 MAX_MESSAGE_AGE = 120
 
-ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", "1355544502,201919317")
+ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", "")
 ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()]
+# ==================== چک امنیتی ====================
+if not TOKEN:
+    print("❌ خطا: BOT_TOKEN توی Env Vars ست نشده!")
+    sys.exit(1)
 
-FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "@falaflihajmmy")
-FORCED_CHANNEL_TITLE = os.environ.get("FORCED_CHANNEL_TITLE", "کانال ما")
+if not ADMIN_IDS:
+    print("❌ خطا: ADMIN_IDS توی Env Vars ست نشده!")
+    sys.exit(1)
+
+if not FORCED_CHANNEL:
+    print("❌ خطا: FORCED_CHANNEL توی Env Vars ست نشده!")
+    sys.exit(1)
+
+print("✅ تنظیمات امنیتی تایید شد")
+FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "")
+FORCED_CHANNEL_TITLE = os.environ.get("FORCED_CHANNEL_TITLE", "")
 
 FORCED_CHANNEL_NORM = None
 _join_cache = {}
