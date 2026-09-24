@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""🍔 ربات فلافل فروشی — نسخه 0.4.0/1 (بخش ۱ از ۲)"""
+"""🍔 ربات فلافل فروشی — نسخه 0.5.0 (بخش ۱ از ۲)"""
 
 import requests, time, random, json, sys, traceback, re, os, threading
 from datetime import datetime, date, timedelta
@@ -49,7 +49,8 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-VERSION = "0.4.0/1"
+
+VERSION = "0.5.0"
 SOURCE_NAME = "🍔 ربات فلافل فروشی"
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "@Mohamad_Amin_pro")
 
@@ -82,14 +83,20 @@ JOIN_PM_COOLDOWN = 300
 CARD_NUMBER = os.environ.get("CARD_NUMBER", "6037-XXXX-XXXX-XXXX")
 CARD_OWNER = os.environ.get("CARD_OWNER", "نام صاحب کارت")
 
+# ═══════════════════════════════════════════════════════════
+#   🛍 پکیج‌های فروشگاه
+# ═══════════════════════════════════════════════════════════
 SHOP_PACKAGES = {
     "coins_small":  {"name": "🟢 ۱۰۰ هزار سکه", "coins": 100000, "price": 50000, "type": "coins"},
     "coins_medium": {"name": "🔵 ۵۰۰ هزار سکه", "coins": 500000, "price": 200000, "type": "coins"},
     "coins_large":  {"name": "🟣 ۱.۵ میلیون سکه", "coins": 1500000, "price": 500000, "type": "coins"},
+    "coins_mega":   {"name": "🔥 ۵ میلیون سکه", "coins": 5000000, "price": 1500000, "type": "coins"},
     "vip_bronze":   {"name": "🥉 VIP برنزی (۱ ماه)", "price": 100000, "type": "vip", "vip": "bronze", "days": 30},
     "vip_silver":   {"name": "🥈 VIP نقره‌ای (۱ ماه)", "price": 250000, "type": "vip", "vip": "silver", "days": 30},
     "vip_gold":     {"name": "🥇 VIP طلایی (۱ ماه)", "price": 500000, "type": "vip", "vip": "gold", "days": 30},
     "vip_diamond":  {"name": "💎 VIP الماسی (۱ ماه)", "price": 1000000, "type": "vip", "vip": "diamond", "days": 30},
+    "gems_100":     {"name": "💎 ۱۰۰ الماس", "gems": 100, "price": 150000, "type": "gems"},
+    "gems_500":     {"name": "💎 ۵۰۰ الماس", "gems": 500, "price": 600000, "type": "gems"},
 }
 
 VIP_LEVELS = {
@@ -121,13 +128,14 @@ BADGES = {
     "generous":   {"name": "🎁 سخاوتمند", "desc": "به یکی هدیه بده"},
     "level_10":   {"name": "⭐ سطح ۱۰", "desc": "به سطح ۱۰ برس"},
     "level_20":   {"name": "🌟 سطح ۲۰", "desc": "به سطح ۲۰ برس"},
+    "pizza_master":{"name": "🍕 پیتزا ساز", "desc": "۱۰ تا پیتزا بپز"},
+    "burger_master":{"name": "🍔 همبرگر ساز", "desc": "۱۰ تا همبرگر بپز"},
 }
 
 BANK_DAILY_PROFIT = 0.20
 BANK_MIN_INVEST = 1000
-BANK_MAX_BALANCE = 10000000
+BANK_MAX_BALANCE = 100000000
 BOX_PRICE = 2000
-ADMIN_MONEY_LIMIT = 100000
 TRANSFER_MIN = 500
 TRANSFER_MAX = 50000
 TRANSFER_COMMISSION = 0.02
@@ -147,8 +155,11 @@ REFERRAL_REWARD_REFERRED = 2000
 
 NUMERIC_FIELDS = [
     "money", "gems", "flour", "chickpeas", "oil", "cheese", "spice",
+    "lettuce", "cucumber", "tomato", "burger_meat", "pizza_dough", "sauce",
+    "mushroom", "sausage",
     "falafel_simple", "falafel_special", "falafel_sandwich",
     "falafel_cheese", "falafel_spicy", "falafel_deluxe",
+    "pizza", "burger", "hotdog", "salad", "mixed_plate",
     "level", "exp", "oven_level", "mixer_level", "counter_level",
     "skill_cook", "skill_trade", "skill_luck", "skill_charm",
     "pet_level", "pet_exp", "pet_hunger",
@@ -156,6 +167,7 @@ NUMERIC_FIELDS = [
     "win_streak", "best_streak",
     "referrals_count", "referral_earnings", "duel_wins", "duel_losses",
     "shop_purchases", "boxes_opened", "vip_days_left",
+    "pizza_cooked", "burger_cooked",
 ]
 
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
@@ -197,62 +209,136 @@ if not ADMIN_IDS and not os.environ.get("RUN_MODE") == "local":
     sys.exit(1)
 print("✅ تنظیمات امنیتی تایید شد")
 
-# ==================== API ====================
-_calls = []
-_user_cmd_cooldown = {}
-USER_CMD_COOLDOWN = 1.5
 
-def check_user_cooldown(uid):
-    if is_admin(uid): return True
-    now = time.time()
-    if len(_user_cmd_cooldown) > 1000:
-        cutoff = now - 60
-        for k in list(_user_cmd_cooldown.keys()):
-            if _user_cmd_cooldown[k] < cutoff:
-                del _user_cmd_cooldown[k]
-    last = _user_cmd_cooldown.get(uid, 0)
-    if now - last < USER_CMD_COOLDOWN: return False
-    _user_cmd_cooldown[uid] = now
-    return True
+# ═══════════════════════════════════════════════════════════
+#   🎮 آیتم‌ها و دستور پخت (بخش جدید)
+# ═══════════════════════════════════════════════════════════
+INGREDIENTS = {
+    # قدیمی
+    "flour":       {"name": "آرد", "emoji": "🌾", "base_price": 200},
+    "chickpeas":   {"name": "نخود", "emoji": "🫘", "base_price": 300},
+    "oil":         {"name": "روغن", "emoji": "🛢", "base_price": 150},
+    "cheese":      {"name": "پنیر", "emoji": "🧀", "base_price": 400},
+    "spice":       {"name": "ادویه", "emoji": "🌶", "base_price": 250},
+    # 🆕 جدید
+    "lettuce":     {"name": "کاهو", "emoji": "🥬", "base_price": 100},
+    "cucumber":    {"name": "خیار", "emoji": "🥒", "base_price": 120},
+    "tomato":      {"name": "گوجه", "emoji": "🍅", "base_price": 150},
+    "burger_meat": {"name": "گوشت همبرگر", "emoji": "🥩", "base_price": 800},
+    "pizza_dough": {"name": "خمیر پیتزا", "emoji": "🫓", "base_price": 500},
+    "sauce":       {"name": "سس", "emoji": "🥫", "base_price": 200},
+    "mushroom":    {"name": "قارچ", "emoji": "🍄", "base_price": 350},
+    "sausage":     {"name": "سوسیس", "emoji": "🌭", "base_price": 600},
+}
 
-def rate_limit():
-    now = time.time()
-    while _calls and now - _calls[0] > 1: _calls.pop(0)
-    if len(_calls) >= 25: time.sleep(0.4)
-    _calls.append(time.time())
+RECIPES = {
+    # فلافل‌ها
+    "simple":   {"name": "فلافل ساده", "emoji": "🟡", "ing": {"flour": 1, "chickpeas": 1, "oil": 1}, "base_price": 1200, "exp": 5},
+    "special":  {"name": "فلافل مخصوص", "emoji": "🟠", "ing": {"flour": 2, "chickpeas": 2, "oil": 1}, "base_price": 2500, "exp": 12},
+    "sandwich": {"name": "ساندویچ فلافل", "emoji": "🥙", "ing": {"flour": 3, "chickpeas": 2, "oil": 2}, "base_price": 4000, "exp": 25},
+    "cheese":   {"name": "فلافل پنیری", "emoji": "🧀", "ing": {"flour": 2, "chickpeas": 2, "oil": 2, "cheese": 2}, "base_price": 3800, "exp": 20},
+    "spicy":    {"name": "فلافل تند", "emoji": "🌶", "ing": {"flour": 2, "chickpeas": 3, "oil": 2, "spice": 2}, "base_price": 3500, "exp": 18},
+    "deluxe":   {"name": "فلافل دلوکس", "emoji": "👑", "ing": {"flour": 5, "chickpeas": 4, "oil": 3, "cheese": 3, "spice": 3}, "base_price": 9000, "exp": 60},
+    # 🆕 جدید
+    "pizza":    {"name": "پیتزا", "emoji": "🍕", "ing": {"pizza_dough": 2, "cheese": 3, "tomato": 2, "mushroom": 1}, "base_price": 8000, "exp": 50},
+    "burger":   {"name": "همبرگر", "emoji": "🍔", "ing": {"burger_meat": 2, "flour": 2, "lettuce": 1, "tomato": 1, "cheese": 1}, "base_price": 6500, "exp": 40},
+    "hotdog":   {"name": "هات‌داگ", "emoji": "🌭", "ing": {"sausage": 2, "flour": 1, "sauce": 1, "cucumber": 1}, "base_price": 4500, "exp": 30},
+    "salad":    {"name": "سالاد", "emoji": "🥗", "ing": {"lettuce": 3, "cucumber": 2, "tomato": 2, "oil": 1}, "base_price": 3500, "exp": 25},
+    "mixed":    {"name": "بشقاب مخلوط", "emoji": "🍽", "ing": {"burger_meat": 1, "sausage": 1, "lettuce": 1, "tomato": 1, "cucumber": 1}, "base_price": 5500, "exp": 35},
+}
 
-def api(method, params=None, req_timeout=None):
-    if req_timeout is None: req_timeout = (CONNECT_TIMEOUT, READ_TIMEOUT)
-    rate_limit()
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = requests.post(BASE_URL + method, data=params, timeout=req_timeout)
-            return r.json()
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            if attempt < MAX_RETRIES - 1: time.sleep(RETRY_DELAY)
-        except Exception as e:
-            log(f"⚠️ API error [{method}]: {e}")
-            return {"ok": False}
-    return {"ok": False}
+# نگاشت دستور کاربر به کلید غذا
+RECIPE_ALIASES = {
+    "ساده": "simple", "معمولی": "simple",
+    "مخصوص": "special", "حرفه": "special", "ویژه": "special",
+    "ساندویچ": "sandwich",
+    "پنیر": "cheese", "پنیری": "cheese",
+    "تند": "spicy",
+    "دلوکس": "deluxe", "لوکس": "deluxe",
+    "پیتزا": "pizza", "پیتزا": "pizza",
+    "همبرگر": "burger", "برگر": "burger",
+    "هاتداگ": "hotdog", "هات داگ": "hotdog", "هات‌داگ": "hotdog",
+    "سالاد": "salad",
+    "مخلوط": "mixed", "بشقاب": "mixed",
+}
 
-def get_updates(offset=None, timeout=POLLING_TIMEOUT):
-    p = {"timeout": timeout}
-    if offset: p["offset"] = offset
-    return api("getUpdates", p, req_timeout=(CONNECT_TIMEOUT, timeout + READ_TIMEOUT))
+UPGRADES = {
+    "oven":    {"name": "🔥 تنور", "max_level": 5, "base_cost": 3000, "cost_mult": 2},
+    "mixer":   {"name": "🥣 مخلوط‌کن", "max_level": 5, "base_cost": 2500, "cost_mult": 2},
+    "counter": {"name": "🏪 پیشخوان", "max_level": 5, "base_cost": 4000, "cost_mult": 2},
+}
 
-def send_message(chat_id, text, reply_markup=None, safe=True):
-    if not text: text = "."
-    if safe: text = safe_md(text)
-    p = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup: p["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-    return api("sendMessage", p)
+SKILLS = {
+    "cook":   {"name": "🍳 آشپزی", "desc": "هر لول ۳٪ شانس پخت دوتایی", "max": 5, "cost": 5},
+    "trade":  {"name": "💼 تجارت", "desc": "هر لول ۳٪ تخفیف مواد", "max": 5, "cost": 5},
+    "luck":   {"name": "🍀 شانس", "desc": "هر لول ۳٪ شانس برد کازینو", "max": 5, "cost": 8},
+    "charm":  {"name": "😊 جذابیت", "desc": "هر لول ۳٪ پاداش مشتری", "max": 5, "cost": 10},
+}
 
-def answer_callback(cb_id, text=None, alert=False):
-    p = {"callback_query_id": cb_id}
-    if text: p["text"] = text; p["show_alert"] = alert
-    return api("answerCallbackQuery", p)
+ACHIEVEMENTS = {
+    "first_cook":  {"name": "🥇 آشپز تازه‌کار", "reward": 500},
+    "cook_10":     {"name": "🍳 آشپز", "reward": 1000},
+    "cook_100":    {"name": "👨‍🍳 سرآشپز", "reward": 5000},
+    "cook_1000":   {"name": "🏆 استاد فلافل", "reward": 25000},
+    "earn_10k":    {"name": "💵 تاجر", "reward": 2000},
+    "earn_100k":   {"name": "💎 میلیونر", "reward": 15000},
+    "earn_1m":     {"name": "👑 سلطان فلافل", "reward": 100000},
+    "level_5":     {"name": "⭐ سطح ۵", "reward": 1000},
+    "level_10":    {"name": "🌟 سطح ۱۰", "reward": 5000},
+    "all_upgrades":{"name": "⚙️ مجهز", "reward": 10000},
+    "daily_7":     {"name": "📅 ۷ روز پیاپی", "reward": 3000},
+    "banker":      {"name": "🏦 بانکدار", "reward": 5000},
+    "investor":    {"name": "📈 سرمایه‌گذار", "reward": 10000},
+    "pet_lover":   {"name": "🐔 پت‌باز", "reward": 1000},
+    "streak_5":    {"name": "🔥 استریک ۵", "reward": 5000},
+    "streak_10":   {"name": "🔥🔥 استریک ۱۰", "reward": 20000},
+    "pizza_10":    {"name": "🍕 پیتزا ساز", "reward": 3000},
+    "burger_10":   {"name": "🍔 برگر ساز", "reward": 3000},
+}
 
-# ==================== DB ====================
+CUSTOMER_TYPES = [
+    {"name": "عادی", "emoji": "👤", "mult": 1.0, "patience": 15},
+    {"name": "خوش‌شانس", "emoji": "😊", "mult": 1.5, "patience": 20},
+    {"name": "عجول", "emoji": "🏃", "mult": 1.8, "patience": 5},
+    {"name": "VIP", "emoji": "🎩", "mult": 2.5, "patience": 10},
+    {"name": "تورگرد", "emoji": "🧑‍🦱", "mult": 1.3, "patience": 25},
+    {"name": "گرسنه", "emoji": "😋", "mult": 2.0, "patience": 12},
+]
+
+BOX_PRIZES = [
+    ("💰 پول کم", "money", 500, 25), ("💰 پول متوسط", "money", 2000, 20),
+    ("💰 پول زیاد", "money", 8000, 10), ("💰 جکپات", "money", 25000, 2),
+    ("🌾 آرد x5", "flour", 5, 8), ("🫘 نخود x5", "chickpeas", 5, 8),
+    ("🛢 روغن x5", "oil", 5, 8), ("🧀 پنیر x3", "cheese", 3, 5),
+    ("🌶 ادویه x3", "spice", 3, 4), ("🥬 کاهو x3", "lettuce", 3, 3),
+    ("🥩 گوشت x2", "burger_meat", 2, 2), ("🍕 خمیر پیتزا x3", "pizza_dough", 3, 2),
+    ("😢 خالی", "none", 0, 3),
+]
+
+SLOT_SYMBOLS = [
+    ("🍒", 20, 5), ("🍋", 15, 6), ("🍇", 10, 8),
+    ("⭐", 8, 12), ("💎", 5, 25), ("7️⃣", 2, 100),
+]
+
+DAILY_EVENTS = [
+    ("double_money", "💰 *امروز ۱.۵ برابر پوله!*"),
+    ("cheap_ingredients", "🛒 *امروز ۲۵٪ تخفیف مواد!*"),
+    ("lucky_casino", "🎰 *امروز شانس کازینو بالاست!*"),
+    ("cook_bonus", "🍳 *امروز ۲ برابر تجربه!*"),
+    ("normal", "🌟 *روز عادی*"),
+]
+
+GEM_SHOP = {
+    "booster":    {"name": "⚡ بوستر ۱ ساعته", "cost": 10, "desc": "درآمد ۲x"},
+    "reroll":     {"name": "🎲 ریست ماموریت", "cost": 5, "desc": "ماموریت جدید"},
+    "luck":       {"name": "🍀 شانس موقت", "cost": 15, "desc": "۱۰ دقیقه شانس بیشتر"},
+    "streak_fix": {"name": "🔥 حفظ استریک", "cost": 20, "desc": "استریک شکسته رو برگردون"},
+}
+
+
+# ═══════════════════════════════════════════════════════════
+#   🗄 دیتابیس
+# ═══════════════════════════════════════════════════════════
 def db():
     if USE_POSTGRES:
         return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -269,19 +355,28 @@ def _t_serial(): return "BIGSERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PR
 def _t_real(): return "DOUBLE PRECISION" if USE_POSTGRES else "REAL"
 def _t_int_pk(): return "BIGINT PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY"
 
+
 def init_db():
-    conn = db()
+    """ساخت جداول — با error handling کامل"""
+    conn = None
     try:
+        conn = db()
         c = conn.cursor()
+
         tables = [
             f"""CREATE TABLE IF NOT EXISTS players (
                 user_id {_t_int_pk()}, first_name TEXT, username TEXT,
                 money INTEGER DEFAULT 5000, gems INTEGER DEFAULT 0,
                 flour INTEGER DEFAULT 10, chickpeas INTEGER DEFAULT 10,
                 oil INTEGER DEFAULT 10, cheese INTEGER DEFAULT 0, spice INTEGER DEFAULT 0,
+                lettuce INTEGER DEFAULT 0, cucumber INTEGER DEFAULT 0, tomato INTEGER DEFAULT 0,
+                burger_meat INTEGER DEFAULT 0, pizza_dough INTEGER DEFAULT 0,
+                sauce INTEGER DEFAULT 0, mushroom INTEGER DEFAULT 0, sausage INTEGER DEFAULT 0,
                 falafel_simple INTEGER DEFAULT 0, falafel_special INTEGER DEFAULT 0,
                 falafel_sandwich INTEGER DEFAULT 0, falafel_cheese INTEGER DEFAULT 0,
                 falafel_spicy INTEGER DEFAULT 0, falafel_deluxe INTEGER DEFAULT 0,
+                pizza INTEGER DEFAULT 0, burger INTEGER DEFAULT 0,
+                hotdog INTEGER DEFAULT 0, salad INTEGER DEFAULT 0, mixed_plate INTEGER DEFAULT 0,
                 level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0,
                 oven_level INTEGER DEFAULT 0, mixer_level INTEGER DEFAULT 0,
                 counter_level INTEGER DEFAULT 0,
@@ -296,7 +391,9 @@ def init_db():
                 duel_wins INTEGER DEFAULT 0, duel_losses INTEGER DEFAULT 0,
                 shop_purchases INTEGER DEFAULT 0, boxes_opened INTEGER DEFAULT 0,
                 total_sold INTEGER DEFAULT 0, total_earned INTEGER DEFAULT 0,
-                total_cooked INTEGER DEFAULT 0, last_daily {_t_real()} DEFAULT 0,
+                total_cooked INTEGER DEFAULT 0,
+                pizza_cooked INTEGER DEFAULT 0, burger_cooked INTEGER DEFAULT 0,
+                last_daily {_t_real()} DEFAULT 0,
                 daily_streak INTEGER DEFAULT 0, last_spin {_t_real()} DEFAULT 0,
                 active_customer TEXT DEFAULT '', customer_expire {_t_real()} DEFAULT 0,
                 customer_order TEXT DEFAULT '', customer_reward INTEGER DEFAULT 0,
@@ -337,7 +434,10 @@ def init_db():
             f"""CREATE TABLE IF NOT EXISTS card_transfers (
                 id {_t_serial()}, sender_id BIGINT, receiver_id BIGINT, amount INTEGER,
                 commission INTEGER, note TEXT, ts {_t_real()})""",
-            "CREATE TABLE IF NOT EXISTS discount_codes (code TEXT PRIMARY KEY, amount INTEGER, max_uses INTEGER DEFAULT 1, uses INTEGER DEFAULT 0, created_by BIGINT, created_at DOUBLE PRECISION, used_by TEXT DEFAULT '[]')",
+            f"""CREATE TABLE IF NOT EXISTS discount_codes (
+                code TEXT PRIMARY KEY, amount INTEGER, max_uses INTEGER DEFAULT 1,
+                uses INTEGER DEFAULT 0, created_by BIGINT, created_at {_t_real()},
+                used_by TEXT DEFAULT '[]')""",
             f"""CREATE TABLE IF NOT EXISTS boosters (
                 user_id BIGINT PRIMARY KEY, multiplier {_t_real()} DEFAULT 2.0,
                 expires_at {_t_real()} DEFAULT 0, bought_at {_t_real()} DEFAULT 0)""",
@@ -357,132 +457,75 @@ def init_db():
                 id {_t_serial()}, referrer_id BIGINT, referred_id BIGINT,
                 reward INTEGER DEFAULT 0, ts {_t_real()})""",
             f"""CREATE TABLE IF NOT EXISTS season_scores (
-                id {_t_serial()}, season TEXT, user_id BIGINT, points INTEGER DEFAULT 0,
+                season TEXT, user_id BIGINT, points INTEGER DEFAULT 0,
                 PRIMARY KEY (season, user_id))""",
             f"""CREATE TABLE IF NOT EXISTS season_winners (
                 id {_t_serial()}, season TEXT, user_id BIGINT, rank INTEGER,
                 prize INTEGER, paid INTEGER DEFAULT 0, ts {_t_real()})""",
+            # 🆕 جدید — خریدهای دستی ادمین
+            f"""CREATE TABLE IF NOT EXISTS user_purchases (
+                id {_t_serial()}, user_id BIGINT, package_key TEXT,
+                amount INTEGER, admin_id BIGINT, note TEXT DEFAULT '',
+                ts {_t_real()})""",
         ]
-        for t in tables:
-            try: c.execute(t)
-            except Exception as e: log(f"⚠️ Table error: {e}")
-        conn.commit()
 
+        for t in tables:
+            try:
+                c.execute(t)
+            except Exception as e:
+                log(f"⚠️ Table error: {e}")
+
+        conn.commit()
+        log("✅ جداول ساخته/چک شدند")
+
+        # ستون‌های جدید برای players (اضافه به جدول قدیمی)
         new_cols = [
-            ("players", "vip_level", "TEXT DEFAULT 'none'"),
-            ("players", "vip_expires", "DOUBLE PRECISION DEFAULT 0"),
-            ("players", "vip_days_left", "INTEGER DEFAULT 0"),
-            ("players", "referrals_count", "INTEGER DEFAULT 0"),
-            ("players", "referral_earnings", "INTEGER DEFAULT 0"),
-            ("players", "referred_by", "BIGINT DEFAULT 0"),
-            ("players", "duel_wins", "INTEGER DEFAULT 0"),
-            ("players", "duel_losses", "INTEGER DEFAULT 0"),
-            ("players", "shop_purchases", "INTEGER DEFAULT 0"),
-            ("players", "boxes_opened", "INTEGER DEFAULT 0"),
-            ("players", "last_work", "DOUBLE PRECISION DEFAULT 0"),
+            ("players", "lettuce", "INTEGER DEFAULT 0"),
+            ("players", "cucumber", "INTEGER DEFAULT 0"),
+            ("players", "tomato", "INTEGER DEFAULT 0"),
+            ("players", "burger_meat", "INTEGER DEFAULT 0"),
+            ("players", "pizza_dough", "INTEGER DEFAULT 0"),
+            ("players", "sauce", "INTEGER DEFAULT 0"),
+            ("players", "mushroom", "INTEGER DEFAULT 0"),
+            ("players", "sausage", "INTEGER DEFAULT 0"),
+            ("players", "pizza", "INTEGER DEFAULT 0"),
+            ("players", "burger", "INTEGER DEFAULT 0"),
+            ("players", "hotdog", "INTEGER DEFAULT 0"),
+            ("players", "salad", "INTEGER DEFAULT 0"),
+            ("players", "mixed_plate", "INTEGER DEFAULT 0"),
+            ("players", "pizza_cooked", "INTEGER DEFAULT 0"),
+            ("players", "burger_cooked", "INTEGER DEFAULT 0"),
         ]
         for tbl, col, dtype in new_cols:
-            try: c.execute(f"SELECT {col} FROM {tbl} LIMIT 1")
+            try:
+                c.execute(f"SELECT {col} FROM {tbl} LIMIT 1")
             except:
                 try:
                     c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
                     conn.commit()
-                except: pass
+                    log(f"✅ ستون {col} به {tbl} اضافه شد")
+                except Exception as e:
+                    log(f"⚠️ ALTER error: {e}")
 
+        # پاک‌سازی NULLها
         for field in NUMERIC_FIELDS:
-            try: c.execute(f"UPDATE players SET {field}=0 WHERE {field} IS NULL")
+            try:
+                c.execute(f"UPDATE players SET {field}=0 WHERE {field} IS NULL")
             except: pass
         conn.commit()
+        log("✅ init_db کامل شد")
+
+    except Exception as e:
+        log(f"❌ init_db error: {e}")
+        log_err()
     finally:
-        close(conn)
+        if conn:
+            close(conn)
 
-# ==================== Game Data ====================
-INGREDIENTS = {
-    "flour":     {"name": "آرد", "emoji": "🌾", "base_price": 200},
-    "chickpeas": {"name": "نخود", "emoji": "🫘", "base_price": 300},
-    "oil":       {"name": "روغن", "emoji": "🛢", "base_price": 150},
-    "cheese":    {"name": "پنیر", "emoji": "🧀", "base_price": 400},
-    "spice":     {"name": "ادویه", "emoji": "🌶", "base_price": 250},
-}
 
-RECIPES = {
-    "simple":   {"name": "فلافل ساده", "emoji": "🟡", "ing": {"flour": 1, "chickpeas": 1, "oil": 1}, "base_price": 1200, "exp": 5},
-    "special":  {"name": "فلافل مخصوص", "emoji": "🟠", "ing": {"flour": 2, "chickpeas": 2, "oil": 1}, "base_price": 2500, "exp": 12},
-    "sandwich": {"name": "ساندویچ فلافل", "emoji": "🥙", "ing": {"flour": 3, "chickpeas": 2, "oil": 2}, "base_price": 4000, "exp": 25},
-    "cheese":   {"name": "فلافل پنیری", "emoji": "🧀", "ing": {"flour": 2, "chickpeas": 2, "oil": 2, "cheese": 2}, "base_price": 3800, "exp": 20},
-    "spicy":    {"name": "فلافل تند", "emoji": "🌶", "ing": {"flour": 2, "chickpeas": 3, "oil": 2, "spice": 2}, "base_price": 3500, "exp": 18},
-    "deluxe":   {"name": "فلافل دلوکس", "emoji": "👑", "ing": {"flour": 5, "chickpeas": 4, "oil": 3, "cheese": 3, "spice": 3}, "base_price": 9000, "exp": 60},
-}
-
-UPGRADES = {
-    "oven":    {"name": "🔥 تنور", "max_level": 5, "base_cost": 3000, "cost_mult": 2},
-    "mixer":   {"name": "🥣 مخلوط‌کن", "max_level": 5, "base_cost": 2500, "cost_mult": 2},
-    "counter": {"name": "🏪 پیشخوان", "max_level": 5, "base_cost": 4000, "cost_mult": 2},
-}
-
-SKILLS = {
-    "cook":   {"name": "🍳 آشپزی", "desc": "هر لول ۳٪ شانس پخت دوتایی", "max": 5, "cost": 5},
-    "trade":  {"name": "💼 تجارت", "desc": "هر لول ۳٪ تخفیف مواد", "max": 5, "cost": 5},
-    "luck":   {"name": "🍀 شانس", "desc": "هر لول ۳٪ شانس برد کازینو", "max": 5, "cost": 8},
-    "charm":  {"name": "😊 جذابیت", "desc": "هر لول ۳٪ پاداش مشتری", "max": 5, "cost": 10},
-}
-
-ACHIEVEMENTS = {
-    "first_cook": {"name": "🥇 آشپز تازه‌کار", "reward": 500},
-    "cook_10":    {"name": "🍳 آشپز", "reward": 1000},
-    "cook_100":   {"name": "👨‍🍳 سرآشپز", "reward": 5000},
-    "cook_1000":  {"name": "🏆 استاد فلافل", "reward": 25000},
-    "earn_10k":   {"name": "💵 تاجر", "reward": 2000},
-    "earn_100k":  {"name": "💎 میلیونر", "reward": 15000},
-    "earn_1m":    {"name": "👑 سلطان فلافل", "reward": 100000},
-    "level_5":    {"name": "⭐ سطح ۵", "reward": 1000},
-    "level_10":   {"name": "🌟 سطح ۱۰", "reward": 5000},
-    "all_upgrades": {"name": "⚙️ مجهز", "reward": 10000},
-    "daily_7":    {"name": "📅 ۷ روز پیاپی", "reward": 3000},
-    "banker":     {"name": "🏦 بانکدار", "reward": 5000},
-    "investor":   {"name": "📈 سرمایه‌گذار", "reward": 10000},
-    "pet_lover":  {"name": "🐔 پت‌باز", "reward": 1000},
-    "streak_5":   {"name": "🔥 استریک ۵", "reward": 5000},
-    "streak_10":  {"name": "🔥🔥 استریک ۱۰", "reward": 20000},
-}
-
-CUSTOMER_TYPES = [
-    {"name": "عادی", "emoji": "👤", "mult": 1.0, "patience": 15},
-    {"name": "خوش‌شانس", "emoji": "😊", "mult": 1.5, "patience": 20},
-    {"name": "عجول", "emoji": "🏃", "mult": 1.8, "patience": 5},
-    {"name": "VIP", "emoji": "🎩", "mult": 2.5, "patience": 10},
-    {"name": "تورگرد", "emoji": "🧑‍🦱", "mult": 1.3, "patience": 25},
-]
-
-BOX_PRIZES = [
-    ("💰 پول کم", "money", 500, 30), ("💰 پول متوسط", "money", 2000, 25),
-    ("💰 پول زیاد", "money", 8000, 10), ("💰 جکپات", "money", 25000, 2),
-    ("🌾 آرد x5", "flour", 5, 10), ("🫘 نخود x5", "chickpeas", 5, 10),
-    ("🛢 روغن x5", "oil", 5, 10), ("🧀 پنیر x3", "cheese", 3, 5),
-    ("🌶 ادویه x3", "spice", 3, 5), ("😢 خالی", "none", 0, 3),
-]
-
-SLOT_SYMBOLS = [
-    ("🍒", 20, 5), ("🍋", 15, 6), ("🍇", 10, 8),
-    ("⭐", 8, 12), ("💎", 5, 25), ("7️⃣", 2, 100),
-]
-
-DAILY_EVENTS = [
-    ("double_money", "💰 *امروز ۱.۵ برابر پوله!*"),
-    ("cheap_ingredients", "🛒 *امروز ۲۵٪ تخفیف مواد!*"),
-    ("lucky_casino", "🎰 *امروز شانس کازینو بالاست!*"),
-    ("cook_bonus", "🍳 *امروز ۲ برابر تجربه!*"),
-    ("normal", "🌟 *روز عادی*"),
-]
-
-GEM_SHOP = {
-    "booster":  {"name": "⚡ بوستر ۱ ساعته", "cost": 10, "desc": "درآمد ۲x"},
-    "reroll":   {"name": "🎲 ریست ماموریت", "cost": 5, "desc": "ماموریت جدید"},
-    "luck":     {"name": "🍀 شانس موقت", "cost": 15, "desc": "۱۰ دقیقه شانس بیشتر"},
-    "streak_fix": {"name": "🔥 حفظ استریک", "cost": 20, "desc": "استریک شکسته رو برگردون"},
-}
-
-# ==================== Player helpers ====================
+# ═══════════════════════════════════════════════════════════
+#   🎮 توابع بازیکن
+# ═══════════════════════════════════════════════════════════
 def get_player(uid):
     conn = db()
     try:
@@ -499,8 +542,12 @@ def get_player(uid):
             if d.get(k) is None: d[k] = ""
         if d.get("vip_level") is None: d["vip_level"] = "none"
         return d
+    except Exception as e:
+        log(f"⚠️ get_player error: {e}")
+        return None
     finally:
         close(conn)
+
 
 def create_player(uid, fn="کاربر", un=""):
     conn = db()
@@ -518,6 +565,7 @@ def create_player(uid, fn="کاربر", un=""):
     finally:
         close(conn)
 
+
 def update_player(uid, **kw):
     if not kw: return
     conn = db()
@@ -532,6 +580,7 @@ def update_player(uid, **kw):
     finally:
         close(conn)
 
+
 def log_txn(uid, type_, amount, desc):
     conn = db()
     try:
@@ -541,6 +590,7 @@ def log_txn(uid, type_, amount, desc):
         conn.commit()
     except: pass
     finally: close(conn)
+
 
 def add_gems(uid, amount, reason=""):
     p = get_player(uid)
@@ -555,6 +605,7 @@ def add_gems(uid, amount, reason=""):
         conn.commit()
     except: pass
     finally: close(conn)
+
 
 def add_exp(uid, amount):
     p = get_player(uid)
@@ -572,6 +623,61 @@ def add_exp(uid, amount):
         return new_level
     return None
 
+
+def get_active_booster(uid):
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT multiplier, expires_at FROM boosters WHERE user_id={ph()}", (uid,))
+        r = c.fetchone()
+        if not r: return 1.0
+        if r["expires_at"] and time.time() < r["expires_at"]: return r["multiplier"] or 1.0
+        return 1.0
+    except: return 1.0
+    finally: close(conn)
+
+
+def get_total_multiplier(uid):
+    p = get_player(uid)
+    mult = 1.0
+    if is_weekend(): mult *= WEEKEND_MULTIPLIER
+    mult *= get_active_booster(uid)
+    if p:
+        vip = p.get("vip_level", "none") or "none"
+        mult *= VIP_LEVELS.get(vip, VIP_LEVELS["none"])["mult"]
+    return mult
+
+
+def get_today_event():
+    today = today_local().isoformat()
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT event_type FROM daily_events WHERE day={ph()}", (today,))
+        r = c.fetchone()
+        if r: return r["event_type"]
+        event = random.choices(DAILY_EVENTS, weights=[15, 15, 15, 15, 40])[0]
+        try:
+            if USE_POSTGRES:
+                c.execute(f"INSERT INTO daily_events (day, event_type, description) VALUES ({ph()},{ph()},{ph()}) ON CONFLICT (day) DO NOTHING",
+                          (today, event[0], event[1]))
+            else:
+                c.execute("INSERT OR REPLACE INTO daily_events (day, event_type, description) VALUES (?,?,?)",
+                          (today, event[0], event[1]))
+            conn.commit()
+        except: pass
+        return event[0]
+    except: return "normal"
+    finally: close(conn)
+
+
+def get_today_event_desc():
+    event = get_today_event()
+    for e in DAILY_EVENTS:
+        if e[0] == event: return e[1]
+    return ""
+
+
 def ing_price(item, mixer, player=None):
     if mixer is None: mixer = 0
     base = INGREDIENTS[item]["base_price"]
@@ -582,6 +688,7 @@ def ing_price(item, mixer, player=None):
         discount += VIP_LEVELS.get(vip, VIP_LEVELS["none"])["discount"]
     if get_today_event() == "cheap_ingredients": discount += 0.25
     return max(1, int(base * (1 - min(discount, 0.6))))
+
 
 def sell_price(key, counter, player=None):
     if counter is None: counter = 0
@@ -595,38 +702,24 @@ def sell_price(key, counter, player=None):
     if get_today_event() == "double_money": bonus += 0.5
     return int(base * (1 + bonus))
 
-def count_falafel(p):
-    return sum(p.get(f"falafel_{k}", 0) or 0 for k in RECIPES)
 
-def upgrade_cost(uid, key):
-    p = get_player(uid)
-    if not p: return None
-    cur = p.get(f"{key}_level", 0) or 0
-    if cur >= UPGRADES[key]["max_level"]: return None
-    return UPGRADES[key]["base_cost"] * (UPGRADES[key]["cost_mult"] ** cur)
+def count_all_food(p):
+    total = 0
+    for k in RECIPES:
+        if k in ("pizza", "burger", "hotdog", "salad", "mixed"):
+            total += p.get(k, 0) or 0
+        else:
+            total += p.get(f"falafel_{k}", 0) or 0
+    return total
 
-def get_active_booster(uid):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT multiplier, expires_at FROM boosters WHERE user_id={ph()}", (uid,))
-        r = c.fetchone()
-        if not r: return 1.0
-        if r["expires_at"] and time.time() < r["expires_at"]: return r["multiplier"] or 1.0
-        return 1.0
-    finally: close(conn)
 
-def get_total_multiplier(uid):
-    p = get_player(uid)
-    mult = 1.0
-    if is_weekend(): mult *= WEEKEND_MULTIPLIER
-    mult *= get_active_booster(uid)
-    if p:
-        vip = p.get("vip_level", "none") or "none"
-        mult *= VIP_LEVELS.get(vip, VIP_LEVELS["none"])["mult"]
-    return mult
+def get_food_field(recipe_key):
+    """اسم ستون دیتابیس برای یه غذا"""
+    if recipe_key in ("pizza", "burger", "hotdog", "salad", "mixed"):
+        return recipe_key
+    return f"falafel_{recipe_key}"
 
-# ==================== VIP ====================
+
 def check_vip_status(uid):
     p = get_player(uid)
     if not p: return "none"
@@ -636,6 +729,96 @@ def check_vip_status(uid):
         return "none"
     return p.get("vip_level", "none") or "none"
 
+
+def get_user_purchases(uid):
+    """🆕 خریدهای دستی ادمین برای این کاربر"""
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT * FROM user_purchases WHERE user_id={ph()} ORDER BY ts DESC LIMIT 20", (uid,))
+        return [dict(r) for r in c.fetchall()]
+    except: return []
+    finally: close(conn)
+
+
+# ═══════════════════════════════════════════════════════════
+#   📡 API
+# ═══════════════════════════════════════════════════════════
+_calls = []
+_user_cmd_cooldown = {}
+USER_CMD_COOLDOWN = 1.5
+
+def check_user_cooldown(uid):
+    if is_admin(uid): return True
+    now = time.time()
+    if len(_user_cmd_cooldown) > 1000:
+        cutoff = now - 60
+        for k in list(_user_cmd_cooldown.keys()):
+            if _user_cmd_cooldown[k] < cutoff:
+                del _user_cmd_cooldown[k]
+    last = _user_cmd_cooldown.get(uid, 0)
+    if now - last < USER_CMD_COOLDOWN: return False
+    _user_cmd_cooldown[uid] = now
+    return True
+
+
+def rate_limit():
+    now = time.time()
+    while _calls and now - _calls[0] > 1: _calls.pop(0)
+    if len(_calls) >= 25: time.sleep(0.4)
+    _calls.append(time.time())
+
+
+def api(method, params=None, req_timeout=None):
+    if req_timeout is None: req_timeout = (CONNECT_TIMEOUT, READ_TIMEOUT)
+    rate_limit()
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = requests.post(BASE_URL + method, data=params, timeout=req_timeout)
+            return r.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt < MAX_RETRIES - 1: time.sleep(RETRY_DELAY)
+        except Exception as e:
+            log(f"⚠️ API error [{method}]: {e}")
+            return {"ok": False}
+    return {"ok": False}
+
+
+def get_updates(offset=None, timeout=POLLING_TIMEOUT):
+    p = {"timeout": timeout}
+    if offset: p["offset"] = offset
+    return api("getUpdates", p, req_timeout=(CONNECT_TIMEOUT, timeout + READ_TIMEOUT))
+
+
+def send_message(chat_id, text, reply_markup=None, safe=True):
+    if not text: text = "."
+    if safe: text = safe_md(text)
+    p = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    if reply_markup: p["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    return api("sendMessage", p)
+
+
+def answer_callback(cb_id, text=None, alert=False):
+    p = {"callback_query_id": cb_id}
+    if text: p["text"] = text; p["show_alert"] = alert
+    return api("answerCallbackQuery", p)
+
+
+_bot_username_cache = None
+
+def get_me_username():
+    global _bot_username_cache
+    if _bot_username_cache: return _bot_username_cache
+    r = api("getMe", {})
+    if r.get("ok"):
+        _bot_username_cache = r["result"].get("username", "")
+        return _bot_username_cache
+    return None
+
+
+# ═══════════════════════════════════════════════════════════
+#   👤 VIP
+# ═══════════════════════════════════════════════════════════
 def buy_vip(uid, chat_id, vip_type, days):
     if vip_type not in VIP_LEVELS or vip_type == "none":
         send_message(chat_id, "❌ نوع VIP نامعتبر"); return
@@ -662,6 +845,7 @@ def buy_vip(uid, chat_id, vip_type, days):
                  f"💰 -{format_money(price)}\n⏰ {new_days} روز مونده\n"
                  f"📈 ضریب درآمد: {VIP_LEVELS[vip_type]['mult']}x", safe=False)
 
+
 def vip_panel(uid, chat_id):
     p = get_player(uid)
     current = check_vip_status(uid)
@@ -678,14 +862,19 @@ def vip_panel(uid, chat_id):
     txt += "\n💡 برای خرید: از دکمه فروشگاه استفاده کن"
     send_message(chat_id, txt, safe=False)
 
-# ==================== Referral ====================
+
+# ═══════════════════════════════════════════════════════════
+#   👥 دعوت
+# ═══════════════════════════════════════════════════════════
 def get_referral_count(uid):
     conn = db()
     try:
         c = conn.cursor()
         c.execute(f"SELECT COUNT(*) as c FROM referrals WHERE referrer_id={ph()}", (uid,))
         return c.fetchone()["c"]
+    except: return 0
     finally: close(conn)
+
 
 def process_referral(new_uid, chat_id, referrer_id):
     if not referrer_id or referrer_id == new_uid: return
@@ -715,6 +904,7 @@ def process_referral(new_uid, chat_id, referrer_id):
     if count >= 5: check_badge(referrer_id, referrer_id, "invite_5")
     if count >= 20: check_badge(referrer_id, referrer_id, "invite_20")
 
+
 def referral_panel(uid, chat_id):
     p = get_player(uid)
     bot_username = "@" + (get_me_username() or "YourBot")
@@ -731,18 +921,10 @@ def referral_panel(uid, chat_id):
            f"💡 این پیام رو برای دوستات بفرست!")
     send_message(chat_id, txt, safe=False)
 
-_bot_username_cache = None
 
-def get_me_username():
-    global _bot_username_cache
-    if _bot_username_cache: return _bot_username_cache
-    r = api("getMe", {})
-    if r.get("ok"):
-        _bot_username_cache = r["result"].get("username", "")
-        return _bot_username_cache
-    return None
-
-# ==================== Badge ====================
+# ═══════════════════════════════════════════════════════════
+#   🏅 نشان
+# ═══════════════════════════════════════════════════════════
 def check_badge(uid, chat_id, badge_id):
     if badge_id not in BADGES: return
     conn = db()
@@ -758,12 +940,14 @@ def check_badge(uid, chat_id, badge_id):
     except: pass
     finally: close(conn)
 
+
 def badges_panel(uid, chat_id):
     conn = db()
     try:
         c = conn.cursor()
         c.execute(f"SELECT badge_id FROM badges WHERE user_id={ph()}", (uid,))
         have = {r["badge_id"] for r in c.fetchall()}
+    except: have = set()
     finally: close(conn)
     txt = f"🏅 *نشان‌های تو*\n━━━━━━━━━━━━━━━\n"
     txt += f"✅ کسب‌شده: {len(have)}/{len(BADGES)}\n\n"
@@ -772,36 +956,10 @@ def badges_panel(uid, chat_id):
         txt += f"{mark} {b['name']}\n   {b['desc']}\n"
     send_message(chat_id, txt, safe=False)
 
-# ==================== Event ====================
-def get_today_event():
-    today = today_local().isoformat()
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT event_type FROM daily_events WHERE day={ph()}", (today,))
-        r = c.fetchone()
-        if r: return r["event_type"]
-        event = random.choices(DAILY_EVENTS, weights=[15, 15, 15, 15, 40])[0]
-        try:
-            if USE_POSTGRES:
-                c.execute(f"INSERT INTO daily_events (day, event_type, description) VALUES ({ph()},{ph()},{ph()}) ON CONFLICT (day) DO NOTHING",
-                          (today, event[0], event[1]))
-            else:
-                c.execute("INSERT OR REPLACE INTO daily_events (day, event_type, description) VALUES (?,?,?)",
-                          (today, event[0], event[1]))
-            conn.commit()
-        except: pass
-        return event[0]
-    except: return "normal"
-    finally: close(conn)
 
-def get_today_event_desc():
-    event = get_today_event()
-    for e in DAILY_EVENTS:
-        if e[0] == event: return e[1]
-    return ""
-
-# ==================== Bank ====================
+# ═══════════════════════════════════════════════════════════
+#   🏦 بانک
+# ═══════════════════════════════════════════════════════════
 def get_bank(uid):
     conn = db()
     try:
@@ -820,6 +978,7 @@ def get_bank(uid):
         return {"user_id": uid, "balance": 0, "invested": 0, "last_collect": 0, "total_profit": 0, "last_invest": 0}
     finally: close(conn)
 
+
 def update_bank(uid, **kw):
     if not kw: return
     conn = db()
@@ -832,6 +991,7 @@ def update_bank(uid, **kw):
     except: pass
     finally: close(conn)
 
+
 def collect_bank_profit(uid):
     b = get_bank(uid)
     if b["invested"] <= 0: return 0
@@ -843,74 +1003,9 @@ def collect_bank_profit(uid):
     new_balance = min(b["balance"] + profit, BANK_MAX_BALANCE)
     update_bank(uid, balance=new_balance, last_collect=ref + days * 86400, total_profit=b["total_profit"] + profit)
     return profit
-
-def do_bank(uid, chat_id, first_name):
-    profit = collect_bank_profit(uid)
-    b = get_bank(uid)
-    txt = (f"🏦 *بانک*\n━━━━━━━━━━━━━━━\n👤 {first_name}\n\n"
-           f"💰 موجودی: {format_money(b['balance'])} تومان\n"
-           f"📈 سرمایه: {format_money(b['invested'])} تومان\n"
-           f"💵 سود کل: {format_money(b['total_profit'])} تومان\n\n")
-    if profit > 0: txt += f"🎉 *سود جدید:* +{format_money(profit)}\n\n"
-    txt += ("📊 سود روزانه: ۲۰٪\n\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n"
-            "`بانک سرمایه ۵۰۰۰`\n`بانک پایان ۵۰۰۰`\n`بانک جمع`")
-    send_message(chat_id, txt, safe=False)
-
-def do_bank_deposit(uid, chat_id, amount):
-    p = get_player(uid)
-    if amount <= 0 or p["money"] < amount:
-        send_message(chat_id, "❌ پول کافی نداری!"); return
-    b = get_bank(uid)
-    if b["balance"] + amount > BANK_MAX_BALANCE:
-        send_message(chat_id, f"❌ سقف {format_money(BANK_MAX_BALANCE)}"); return
-    update_player(uid, money=p["money"] - amount)
-    update_bank(uid, balance=b["balance"] + amount)
-    send_message(chat_id, f"✅ {format_money(amount)} واریز شد.")
-
-def do_bank_withdraw(uid, chat_id, amount):
-    b = get_bank(uid)
-    if amount <= 0 or b["balance"] < amount:
-        send_message(chat_id, "❌ حساب کافی نیست!"); return
-    p = get_player(uid)
-    update_player(uid, money=p["money"] + amount)
-    update_bank(uid, balance=b["balance"] - amount)
-    send_message(chat_id, f"✅ {format_money(amount)} برداشت شد.")
-
-def do_bank_invest(uid, chat_id, amount):
-    p = get_player(uid)
-    if amount < BANK_MIN_INVEST or p["money"] < amount:
-        send_message(chat_id, f"❌ حداقل {format_money(BANK_MIN_INVEST)}"); return
-    collect_bank_profit(uid)
-    b = get_bank(uid)
-    now = time.time()
-    update_player(uid, money=p["money"] - amount)
-    update_bank(uid, invested=b["invested"] + amount, last_invest=now,
-                last_collect=b["last_collect"] if b["last_collect"] > 0 else now)
-    send_message(chat_id, f"📈 {format_money(amount)} سرمایه‌گذاری شد!")
-
-def do_bank_end_invest(uid, chat_id, amount):
-    b = get_bank(uid)
-    if amount <= 0 or b["invested"] < amount:
-        send_message(chat_id, "❌ سرمایه کافی نیست!"); return
-    collect_bank_profit(uid)
-    b = get_bank(uid)
-    update_bank(uid, invested=b["invested"] - amount, balance=b["balance"] + amount)
-    send_message(chat_id, f"✅ {format_money(amount)} برگشت.")
-
-def do_bank_collect(uid, chat_id):
-    profit = collect_bank_profit(uid)
-    if profit > 0:
-        send_message(chat_id, f"🎉 *سود:* +{format_money(profit)}")
-    else:
-        b = get_bank(uid)
-        if b["invested"] <= 0:
-            send_message(chat_id, "❌ سرمایه‌ای نداری!\n`بانک سرمایه ۵۰۰۰`")
-        else:
-            ref = b["last_collect"] if b["last_collect"] > 0 else b["last_invest"]
-            left = max(0, 86400 - (time.time() - ref))
-            send_message(chat_id, f"⏰ بعدی: {int(left//3600)}س {int((left%3600)//60)}د")
-
-# ==================== Casino + Slot ====================
+    # ═══════════════════════════════════════════════════════════
+#   🎰 کازینو + اسلات
+# ═══════════════════════════════════════════════════════════
 def do_casino(uid, chat_id, amount, bet_type):
     if amount < 500 or amount > 100000:
         send_message(chat_id, "❌ شرط بین ۵۰۰ تا ۱۰۰,۰۰۰!"); return
@@ -935,6 +1030,7 @@ def do_casino(uid, chat_id, amount, bet_type):
         update_player(uid, money=p["money"] - amount, win_streak=0)
         log_txn(uid, "casino_lose", -amount, "باخت کازینو")
         send_message(chat_id, f"🎰 *کازینو*\n💰 {format_money(amount)} — {bet_type}\n🎲 *{result}*\n\n😢 باختی!", safe=False)
+
 
 def do_slot(uid, chat_id, amount):
     if amount < SLOT_MIN or amount > SLOT_MAX:
@@ -961,7 +1057,10 @@ def do_slot(uid, chat_id, amount):
         log_txn(uid, "slot_lose", -amount, "باخت اسلات")
         send_message(chat_id, f"🎰 *اسلات*\n┃ {symbols[0]} ┃ {symbols[1]} ┃ {symbols[2]} ┃\n\n😢 باختی! -{format_money(amount)}", safe=False)
 
-# ==================== Box ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🎁 جعبه
+# ═══════════════════════════════════════════════════════════
 def do_mystery_box(uid, chat_id):
     p = get_player(uid)
     if p["money"] < BOX_PRICE:
@@ -985,7 +1084,10 @@ def do_mystery_box(uid, chat_id):
     if (p.get("boxes_opened", 0) or 0) + 1 >= 10:
         check_badge(uid, chat_id, "collector")
 
-# ==================== Booster ====================
+
+# ═══════════════════════════════════════════════════════════
+#   ⚡ بوستر
+# ═══════════════════════════════════════════════════════════
 def do_booster(uid, chat_id):
     p = get_player(uid)
     if p["money"] < BOOSTER_PRICE:
@@ -1010,6 +1112,7 @@ def do_booster(uid, chat_id):
     update_player(uid, money=p["money"] - BOOSTER_PRICE)
     send_message(chat_id, f"⚡ *بوستر فعال!*\n💰 -{format_money(BOOSTER_PRICE)}\n🎁 2x برای ۱ ساعت")
 
+
 def booster_status(uid):
     conn = db()
     try:
@@ -1020,9 +1123,13 @@ def booster_status(uid):
             left = int((r["expires_at"] - time.time()) // 60)
             return f"⚡ بوستر: {left} دقیقه ({r['multiplier']}x)"
         return "⚡ بوستری نیست"
+    except: return "⚡ بوستری نیست"
     finally: close(conn)
 
-# ==================== Reminders ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🔔 یادآور
+# ═══════════════════════════════════════════════════════════
 def do_reminder_set(uid, chat_id, text_body, seconds):
     if not text_body.strip() or seconds < 60 or seconds > 86400:
         send_message(chat_id, "مثال: `یادآور ۱۰m جلسه` (۱ دقیقه تا ۲۴ ساعت)"); return
@@ -1032,8 +1139,10 @@ def do_reminder_set(uid, chat_id, text_body, seconds):
         c.execute(f"INSERT INTO reminders (user_id, chat_id, text, remind_at, created_at) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
                   (uid, chat_id, text_body, time.time() + seconds, time.time()))
         conn.commit()
+    except: pass
     finally: close(conn)
     send_message(chat_id, f"🔔 ثبت شد! بعد از {seconds // 60} دقیقه")
+
 
 def do_reminder_list(uid, chat_id):
     conn = db()
@@ -1041,6 +1150,7 @@ def do_reminder_list(uid, chat_id):
         c = conn.cursor()
         c.execute(f"SELECT id, text, remind_at FROM reminders WHERE user_id={ph()} ORDER BY remind_at ASC LIMIT 10", (uid,))
         rows = c.fetchall()
+    except: rows = []
     finally: close(conn)
     if not rows:
         send_message(chat_id, "🔕 یادآوری نداری."); return
@@ -1049,11 +1159,15 @@ def do_reminder_list(uid, chat_id):
         txt += f"• {r['text']} ({int((r['remind_at'] - time.time()) // 60)} دقیقه)\n"
     send_message(chat_id, txt, safe=False)
 
-# ==================== Lottery ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🎫 لاتاری
+# ═══════════════════════════════════════════════════════════
 def get_week_key():
     today = today_local()
     days_since_sat = (today.weekday() - 5) % 7
     return (today - timedelta(days=days_since_sat)).isoformat()
+
 
 def get_lottery_tickets(uid):
     week = get_week_key()
@@ -1063,7 +1177,9 @@ def get_lottery_tickets(uid):
         c.execute(f"SELECT tickets FROM lottery WHERE user_id={ph()} AND week={ph()}", (uid, week))
         r = c.fetchone()
         return r["tickets"] if r else 0
+    except: return 0
     finally: close(conn)
+
 
 def do_lottery_buy(uid, chat_id):
     p = get_player(uid)
@@ -1086,6 +1202,7 @@ def do_lottery_buy(uid, chat_id):
     finally: close(conn)
     send_message(chat_id, f"🎫 بلیط خریداری شد!\n🎯 بلیط‌های تو: {total}")
 
+
 def do_lottery_panel(uid, chat_id):
     tickets = get_lottery_tickets(uid)
     conn = db()
@@ -1093,7 +1210,9 @@ def do_lottery_panel(uid, chat_id):
         c = conn.cursor()
         week = get_week_key()
         c.execute(f"SELECT SUM(tickets) s FROM lottery WHERE week={ph()}", (week,))
-        total = c.fetchone()["s"] or 0
+        row = c.fetchone()
+        total = (row["s"] if row else 0) or 0
+    except: total = 0
     finally: close(conn)
     prize = total * LOTTERY_PRICE * 80 // 100
     send_message(chat_id,
@@ -1102,11 +1221,14 @@ def do_lottery_panel(uid, chat_id):
                  f"💰 جایزه: {format_money(prize)}\n\n"
                  f"`لاتاری بخر` — {format_money(LOTTERY_PRICE)}", safe=False)
 
+
 def draw_lottery():
     week = get_week_key()
     today = today_local()
     days_since_sat = (today.weekday() - 5) % 7
     prev_week = (today - timedelta(days=days_since_sat + 7)).isoformat()
+    winner = None
+    prize = 0
     conn = db()
     try:
         c = conn.cursor()
@@ -1119,19 +1241,25 @@ def draw_lottery():
         for p in participants: pool.extend([p["user_id"]] * (p["tickets"] or 1))
         winner = random.choice(pool)
         c.execute(f"SELECT SUM(tickets) s FROM lottery WHERE week={ph()}", (prev_week,))
-        total = c.fetchone()["s"] or 0
+        row = c.fetchone()
+        total = (row["s"] if row else 0) or 0
         prize = total * LOTTERY_PRICE * 80 // 100
         c.execute(f"INSERT INTO lottery_winners (week, user_id, tickets, prize, paid, ts) VALUES ({ph()},{ph()},{ph()},{ph()},1,{ph()})",
                   (prev_week, winner, total, prize, time.time()))
         conn.commit()
+    except: pass
     finally: close(conn)
-    wp = get_player(winner)
-    if wp:
-        update_player(winner, money=wp["money"] + prize)
-        try: send_message(winner, f"🎉 *برنده لاتاری!*\n💰 +{format_money(prize)}")
-        except: pass
+    if winner:
+        wp = get_player(winner)
+        if wp:
+            update_player(winner, money=wp["money"] + prize)
+            try: send_message(winner, f"🎉 *برنده لاتاری!*\n💰 +{format_money(prize)}")
+            except: pass
 
-# ==================== Skills ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🎓 مهارت‌ها
+# ═══════════════════════════════════════════════════════════
 def do_skills_panel(uid, chat_id):
     p = get_player(uid)
     gems = p.get("gems", 0) or 0
@@ -1142,6 +1270,7 @@ def do_skills_panel(uid, chat_id):
         txt += f"{s['name']}: {bar} ({lvl}/{s['max']})\n  {s['desc']}\n  💎 {s['cost']}\n\n"
     txt += "`مهارت بخر [cook|trade|luck|charm]`"
     send_message(chat_id, txt, safe=False)
+
 
 def do_skill_buy(uid, chat_id, key):
     if key not in SKILLS:
@@ -1158,7 +1287,10 @@ def do_skill_buy(uid, chat_id, key):
     update_player(uid, **{f"skill_{key}": lvl + 1})
     send_message(chat_id, f"✅ {s['name']} → سطح {lvl + 1}!")
 
-# ==================== Pet ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🐔 پت
+# ═══════════════════════════════════════════════════════════
 def do_pet_panel(uid, chat_id):
     p = get_player(uid)
     lvl = p.get("pet_level", 0) or 0
@@ -1172,6 +1304,7 @@ def do_pet_panel(uid, chat_id):
                  f"⭐ تجربه: {exp}/100\n🍖 سیری: {hunger}%\n\n"
                  f"`پت غذا بده` — {format_money(PET_FEED_PRICE)}", safe=False)
 
+
 def do_pet_buy(uid, chat_id):
     p = get_player(uid)
     if (p.get("pet_level", 0) or 0) > 0:
@@ -1181,6 +1314,7 @@ def do_pet_buy(uid, chat_id):
     update_player(uid, money=p["money"] - 10000, pet_level=1, pet_exp=0, pet_hunger=100)
     check_ach(uid, chat_id)
     send_message(chat_id, "🎉 *پت جدید!* 🐔")
+
 
 def do_pet_feed(uid, chat_id):
     p = get_player(uid)
@@ -1199,7 +1333,10 @@ def do_pet_feed(uid, chat_id):
     update_player(uid, pet_level=lvl, pet_exp=exp)
     send_message(chat_id, f"🍖 غذا خورد!\n⭐ {exp}/100\n🍖 {hunger}%")
 
-# ==================== Gem Shop ====================
+
+# ═══════════════════════════════════════════════════════════
+#   💎 فروشگاه الماس
+# ═══════════════════════════════════════════════════════════
 def do_gem_shop(uid, chat_id):
     p = get_player(uid)
     gems = p.get("gems", 0) or 0
@@ -1208,6 +1345,7 @@ def do_gem_shop(uid, chat_id):
         txt += f"• {item['name']} — 💎 {item['cost']}\n  {item['desc']}\n\n"
     txt += "`الماس بخر [نام]`"
     send_message(chat_id, txt, safe=False)
+
 
 def do_gem_buy(uid, chat_id, key):
     if key not in GEM_SHOP:
@@ -1259,7 +1397,10 @@ def do_gem_buy(uid, chat_id, key):
         update_player(uid, win_streak=1)
         send_message(chat_id, "🔥 استریک ریست شد!")
 
-# ==================== Achievements ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🏆 دستاوردها
+# ═══════════════════════════════════════════════════════════
 def check_ach(uid, chat_id):
     p = get_player(uid)
     if not p: return
@@ -1281,6 +1422,8 @@ def check_ach(uid, chat_id):
             ("pet_lover", (p.get("pet_level", 0) or 0) >= 5),
             ("streak_5", (p.get("best_streak", 0) or 0) >= 5),
             ("streak_10", (p.get("best_streak", 0) or 0) >= 10),
+            ("pizza_10", (p.get("pizza_cooked", 0) or 0) >= 10),
+            ("burger_10", (p.get("burger_cooked", 0) or 0) >= 10),
         ]
         for aid, cond in checks:
             if cond and aid not in have:
@@ -1294,9 +1437,13 @@ def check_ach(uid, chat_id):
                 update_player(uid, money=p2["money"] + reward)
                 add_gems(uid, 2, f"دستاورد {aid}")
                 send_message(chat_id, f"🎉 *دستاورد!*\n{ACHIEVEMENTS[aid]['name']}\n💵 +{reward:,}\n💎 +۲", safe=False)
+    except: pass
     finally: close(conn)
 
-# ==================== Force Join ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🔒 Force Join
+# ═══════════════════════════════════════════════════════════
 def normalize_channel(ch):
     if not ch: return ""
     ch = str(ch).strip()
@@ -1306,15 +1453,18 @@ def normalize_channel(ch):
     if not ch.startswith("@") and not ch.lstrip("-").isdigit(): ch = "@" + ch
     return ch
 
+
 def get_forced_channel():
     global FORCED_CHANNEL_NORM
     if FORCED_CHANNEL_NORM is None:
         FORCED_CHANNEL_NORM = normalize_channel(FORCED_CHANNEL)
     return FORCED_CHANNEL_NORM
 
+
 def clear_join_cache(uid=None):
     if uid: _join_cache.pop(uid, None)
     else: _join_cache.clear()
+
 
 def is_joined(uid, use_cache=True):
     if is_admin(uid): return True
@@ -1335,6 +1485,7 @@ def is_joined(uid, use_cache=True):
     _join_cache[uid] = (result, now)
     return result
 
+
 def send_join_pm(uid, first_name="کاربر", force=False):
     now = time.time()
     if not force and uid in _join_pm_sent and now - _join_pm_sent[uid] < JOIN_PM_COOLDOWN: return
@@ -1352,50 +1503,13 @@ def send_join_pm(uid, first_name="کاربر", force=False):
     ]}
     send_message(uid, text, jk, safe=False)
 
-# ==================== Customer ====================
-def spawn_customer(uid):
-    p = get_player(uid)
-    if not p or (p["active_customer"] and time.time() < (p["customer_expire"] or 0)): return None
-    ctype = random.choices(CUSTOMER_TYPES, weights=[40, 30, 15, 8, 7])[0]
-    recipe = random.choice(list(RECIPES.keys()))
-    qty = random.randint(1, 3)
-    reward = int(RECIPES[recipe]["base_price"] * qty * ctype["mult"])
-    expire = time.time() + ctype["patience"] * 60
-    update_player(uid, active_customer=ctype["name"], customer_expire=expire,
-                  customer_order=f"{recipe}:{qty}", customer_reward=reward)
-    return {"type": ctype, "recipe": recipe, "qty": qty, "reward": reward, "expire": expire}
 
-def customer_text(cust):
-    r = RECIPES[cust["recipe"]]
-    mins = int((cust["expire"] - time.time()) / 60)
-    return (f"🔔 *مشتری!*\n{cust['type']['emoji']} {cust['type']['name']}\n"
-            f"📋 {cust['qty']} {r['emoji']} {r['name']}\n⏰ {mins} دقیقه\n"
-            f"💰 {format_money(cust['reward'])}\n\n`تحویل بده`")
-
-def fulfill_customer(uid, chat_id):
-    p = get_player(uid)
-    if not p or not p["active_customer"]: return None
-    if time.time() > (p["customer_expire"] or 0):
-        update_player(uid, active_customer="", customer_order="", customer_reward=0, customer_expire=0)
-        return "expired"
-    try:
-        recipe, qty = p["customer_order"].split(":")
-        qty = int(qty)
-    except: return None
-    field = f"falafel_{recipe}"
-    have = p.get(field, 0) or 0
-    if have < qty: return ("missing", recipe, qty - have)
-    reward = int((p["customer_reward"] or 0) * get_total_multiplier(uid))
-    update_player(uid, **{field: have - qty}, money=p["money"] + reward,
-                  total_earned=(p["total_earned"] or 0) + reward,
-                  total_sold=(p["total_sold"] or 0) + qty,
-                  active_customer="", customer_order="", customer_reward=0, customer_expire=0)
-    add_exp(uid, 10 * qty)
-    check_ach(uid, chat_id)
-    return ("ok", reward, qty, recipe)
-
-# ==================== Action Helpers ====================
+# ═══════════════════════════════════════════════════════════
+#   🛒 خرید و فروش
+# ═══════════════════════════════════════════════════════════
 def do_buy(uid, chat_id, item, qty):
+    if qty < 1: qty = 1
+    if qty > 100: qty = 100
     p = get_player(uid)
     if item not in INGREDIENTS:
         send_message(chat_id, "❌ آیتم نامعتبر."); return False
@@ -1408,6 +1522,7 @@ def do_buy(uid, chat_id, item, qty):
     track_mission(uid, "buy", 1, chat_id)
     send_message(chat_id, f"✅ {qty} {INGREDIENTS[item]['emoji']} {INGREDIENTS[item]['name']}\n💵 -{format_money(price)}\n📦 {have + qty}")
     return True
+
 
 def do_cook(uid, chat_id, recipe):
     p = get_player(uid)
@@ -1422,8 +1537,11 @@ def do_cook(uid, chat_id, recipe):
         send_message(chat_id, "❌ مواد کم: " + " | ".join(missing)); return
     double_chance = (p["oven_level"] or 0) * 0.05 + (p.get("skill_cook", 0) or 0) * 0.03
     qty_prod = 2 if random.random() < double_chance else 1
-    field = f"falafel_{recipe}"
+    field = get_food_field(recipe)
     up = {field: (p.get(field, 0) or 0) + qty_prod, "total_cooked": (p["total_cooked"] or 0) + qty_prod}
+    # آمار پیتزا/برگر
+    if recipe == "pizza": up["pizza_cooked"] = (p.get("pizza_cooked", 0) or 0) + qty_prod
+    if recipe == "burger": up["burger_cooked"] = (p.get("burger_cooked", 0) or 0) + qty_prod
     for item, need in r["ing"].items(): up[item] = (p.get(item, 0) or 0) - need
     update_player(uid, **up)
     exp = r["exp"] * qty_prod
@@ -1437,6 +1555,7 @@ def do_cook(uid, chat_id, recipe):
     track_mission(uid, "cook", qty_prod, chat_id)
     send_message(chat_id, msg)
 
+
 def do_sell(uid, chat_id, target):
     p = get_player(uid)
     mult = get_total_multiplier(uid)
@@ -1446,10 +1565,11 @@ def do_sell(uid, chat_id, target):
     if target == "all":
         total, qty, up = 0, 0, {}
         for k in RECIPES:
-            h = p.get(f"falafel_{k}", 0) or 0
+            field = get_food_field(k)
+            h = p.get(field, 0) or 0
             if h:
                 total += sell_price(k, p["counter_level"], p) * h
-                qty += h; up[f"falafel_{k}"] = 0
+                qty += h; up[field] = 0
         if qty == 0:
             send_message(chat_id, "❌ چیزی نداری!"); return
         total = int(total * mult)
@@ -1457,18 +1577,90 @@ def do_sell(uid, chat_id, target):
                       total_earned=(p["total_earned"] or 0) + total, **up)
         add_exp(uid, qty * 3); check_ach(uid, chat_id)
         track_mission(uid, "sell", total, chat_id)
-        send_message(chat_id, f"💰 {qty} فلافل!\n💵 +{format_money(total)}{extra}", safe=False)
+        send_message(chat_id, f"💰 {qty} غذا!\n💵 +{format_money(total)}{extra}", safe=False)
         return
-    h = p.get(f"falafel_{target}", 0) or 0
+    if target not in RECIPES:
+        send_message(chat_id, "❌ نامعتبر."); return
+    field = get_food_field(target)
+    h = p.get(field, 0) or 0
     if h == 0:
         send_message(chat_id, f"❌ نداری!"); return
     total = int(sell_price(target, p["counter_level"], p) * h * mult)
     update_player(uid, money=p["money"] + total, total_sold=(p["total_sold"] or 0) + h,
-                  total_earned=(p["total_earned"] or 0) + total, **{f"falafel_{target}": 0})
+                  total_earned=(p["total_earned"] or 0) + total, **{field: 0})
     add_exp(uid, h * 3); check_ach(uid, chat_id)
     track_mission(uid, "sell", total, chat_id)
     send_message(chat_id, f"💰 {h}x {RECIPES[target]['emoji']} {RECIPES[target]['name']}\n💵 +{format_money(total)}{extra}", safe=False)
 
+
+# ═══════════════════════════════════════════════════════════
+#   🎯 ماموریت
+# ═══════════════════════════════════════════════════════════
+def get_missions(uid):
+    today = today_local().isoformat()
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT missions, completed FROM daily_missions WHERE user_id={ph()} AND day={ph()}", (uid, today))
+        r = c.fetchone()
+        if r: return json.loads(r["missions"]), json.loads(r["completed"])
+        missions = [
+            {"id": "cook", "title": "🍳 بپز", "target": random.randint(3, 8), "reward": random.randint(500, 1500), "progress": 0},
+            {"id": "sell", "title": "💰 فروش بگیر", "target": random.randint(3000, 12000), "reward": random.randint(1000, 2500), "progress": 0},
+            {"id": "buy", "title": "🛒 مواد بخر", "target": random.randint(3, 10), "reward": random.randint(500, 1000), "progress": 0},
+        ]
+        try:
+            if USE_POSTGRES:
+                c.execute(f"INSERT INTO daily_missions (user_id, day, missions, completed) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id, day) DO NOTHING",
+                          (uid, today, json.dumps(missions), json.dumps([])))
+            else:
+                c.execute("INSERT OR REPLACE INTO daily_missions VALUES (?,?,?,?)",
+                          (uid, today, json.dumps(missions), json.dumps([])))
+            conn.commit()
+        except: pass
+        return missions, []
+    finally: close(conn)
+
+
+def track_mission(uid, kind, value, chat_id):
+    try:
+        today = today_local().isoformat()
+        missions, completed = get_missions(uid)
+        changed = False
+        for m in missions:
+            if m["id"] == kind and m["id"] not in completed:
+                m["progress"] += value
+                if m["progress"] >= m["target"]:
+                    completed.append(m["id"])
+                    p = get_player(uid)
+                    update_player(uid, money=p["money"] + m["reward"])
+                    log_txn(uid, "mission", m["reward"], m["title"])
+                    send_message(chat_id, f"🎯 ماموریت!\n{m['title']} ✅\n💰 +{format_money(m['reward'])}")
+                changed = True
+        if changed:
+            conn = db()
+            try:
+                c = conn.cursor()
+                c.execute(f"UPDATE daily_missions SET missions={ph()}, completed={ph()} WHERE user_id={ph()} AND day={ph()}",
+                          (json.dumps(missions), json.dumps(completed), uid, today))
+                conn.commit()
+            finally: close(conn)
+    except: pass
+
+
+def do_missions(uid, chat_id):
+    missions, completed = get_missions(uid)
+    txt = "🎯 *ماموریت‌های امروز*\n"
+    for m in missions:
+        done = "✅" if m["id"] in completed else "⏳"
+        bar_len = min(int((m["progress"] / m["target"]) * 10), 10) if m["target"] else 0
+        txt += f"{done} {m['title']}: {m['progress']}/{m['target']} {'█'*bar_len}{'░'*(10-bar_len)} 💰{format_money(m['reward'])}\n"
+    send_message(chat_id, txt, safe=False)
+
+
+# ═══════════════════════════════════════════════════════════
+#   🎁 جایزه روزانه + گردونه
+# ═══════════════════════════════════════════════════════════
 def do_daily(uid, chat_id):
     p = get_player(uid)
     now = time.time()
@@ -1497,6 +1689,7 @@ def do_daily(uid, chat_id):
     if streak >= 30: check_badge(uid, chat_id, "streak_30")
     send_message(chat_id, f"🎁 جایزه!\n💰 +{format_money(reward)}\n🔥 {streak} روز{extra}")
 
+
 def do_spin(uid, chat_id):
     p = get_player(uid)
     now = time.time()
@@ -1521,6 +1714,18 @@ def do_spin(uid, chat_id):
     update_player(uid, **up)
     send_message(chat_id, f"🎰 *گردونه!*\n🎉 {pr[0]}\n{msg_}", safe=False)
 
+
+# ═══════════════════════════════════════════════════════════
+#   ⚙️ آپگرید
+# ═══════════════════════════════════════════════════════════
+def upgrade_cost(uid, key):
+    p = get_player(uid)
+    if not p: return None
+    cur = p.get(f"{key}_level", 0) or 0
+    if cur >= UPGRADES[key]["max_level"]: return None
+    return UPGRADES[key]["base_cost"] * (UPGRADES[key]["cost_mult"] ** cur)
+
+
 def do_upgrade(uid, chat_id, key):
     p = get_player(uid)
     cost = upgrade_cost(uid, key)
@@ -1533,6 +1738,10 @@ def do_upgrade(uid, chat_id, key):
     check_ach(uid, chat_id)
     send_message(chat_id, f"✅ {UPGRADES[key]['name']} → {new_lvl}!\n💵 -{format_money(cost)}")
 
+
+# ═══════════════════════════════════════════════════════════
+#   👤 پروفایل + رتبه
+# ═══════════════════════════════════════════════════════════
 def do_profile(uid, chat_id, first_name):
     p = get_player(uid)
     b = get_bank(uid)
@@ -1543,6 +1752,7 @@ def do_profile(uid, chat_id, first_name):
         ach = c.fetchone()["c"]
         c.execute(f"SELECT COUNT(*) c FROM badges WHERE user_id={ph()}", (uid,))
         badges_count = c.fetchone()["c"]
+    except: ach = 0; badges_count = 0
     finally: close(conn)
     vip = check_vip_status(uid)
     vip_days = p.get("vip_days_left", 0) or 0
@@ -1560,12 +1770,14 @@ def do_profile(uid, chat_id, first_name):
                  f"🏦 {format_money(b['balance'])}\n"
                  f"📈 {format_money(b['invested'])}\n\n"
                  f"🌾{p.get('flour',0)} 🫘{p.get('chickpeas',0)} 🛢{p.get('oil',0)} 🧀{p.get('cheese',0)} 🌶{p.get('spice',0)}\n"
-                 f"🍽 {count_falafel(p)}\n"
+                 f"🥬{p.get('lettuce',0)} 🥒{p.get('cucumber',0)} 🍅{p.get('tomato',0)} 🥩{p.get('burger_meat',0)}\n"
+                 f"🍽 {count_all_food(p)}\n"
                  f"📦 {p['total_sold']} | 💵 {format_money(p['total_earned'])}\n"
                  f"🍳 {p['total_cooked']}\n"
                  f"🎯 {ach}/{len(ACHIEVEMENTS)} | 🏅 {badges_count}/{len(BADGES)}\n"
                  f"🔥 {p['daily_streak']} روز\n{streak_line}\n{pet_line}\n"
                  f"🎫 {tickets}\n👥 {p.get('referrals_count', 0) or 0}\n{booster_status(uid)}\n{weekend_line}", safe=False)
+
 
 def do_top(chat_id):
     conn = db()
@@ -1573,6 +1785,7 @@ def do_top(chat_id):
         c = conn.cursor()
         c.execute("SELECT first_name, total_earned, level FROM players ORDER BY total_earned DESC LIMIT 10")
         rows = c.fetchall()
+    except: rows = []
     finally: close(conn)
     medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
     txt = "🏆 *رتبه‌بندی*\n━━━━━━━━━━━━━━━\n"
@@ -1580,10 +1793,58 @@ def do_top(chat_id):
         txt += f"{medals[i]} {r['first_name']} — {r['level']} — {format_money(r['total_earned'] or 0)}\n"
     send_message(chat_id, txt, safe=False)
 
+
+# ═══════════════════════════════════════════════════════════
+#   🔔 مشتری
+# ═══════════════════════════════════════════════════════════
+def spawn_customer(uid):
+    p = get_player(uid)
+    if not p or (p["active_customer"] and time.time() < (p["customer_expire"] or 0)): return None
+    ctype = random.choices(CUSTOMER_TYPES, weights=[35, 25, 15, 8, 7, 10])[0]
+    recipe = random.choice(list(RECIPES.keys()))
+    qty = random.randint(1, 3)
+    reward = int(RECIPES[recipe]["base_price"] * qty * ctype["mult"])
+    expire = time.time() + ctype["patience"] * 60
+    update_player(uid, active_customer=ctype["name"], customer_expire=expire,
+                  customer_order=f"{recipe}:{qty}", customer_reward=reward)
+    return {"type": ctype, "recipe": recipe, "qty": qty, "reward": reward, "expire": expire}
+
+
+def customer_text(cust):
+    r = RECIPES[cust["recipe"]]
+    mins = int((cust["expire"] - time.time()) / 60)
+    return (f"🔔 *مشتری!*\n{cust['type']['emoji']} {cust['type']['name']}\n"
+            f"📋 {cust['qty']} {r['emoji']} {r['name']}\n⏰ {mins} دقیقه\n"
+            f"💰 {format_money(cust['reward'])}\n\n`تحویل بده`")
+
+
+def fulfill_customer(uid, chat_id):
+    p = get_player(uid)
+    if not p or not p["active_customer"]: return None
+    if time.time() > (p["customer_expire"] or 0):
+        update_player(uid, active_customer="", customer_order="", customer_reward=0, customer_expire=0)
+        return "expired"
+    try:
+        recipe, qty = p["customer_order"].split(":")
+        qty = int(qty)
+    except: return None
+    field = get_food_field(recipe)
+    have = p.get(field, 0) or 0
+    if have < qty: return ("missing", recipe, qty - have)
+    reward = int((p["customer_reward"] or 0) * get_total_multiplier(uid))
+    update_player(uid, **{field: have - qty}, money=p["money"] + reward,
+                  total_earned=(p["total_earned"] or 0) + reward,
+                  total_sold=(p["total_sold"] or 0) + qty,
+                  active_customer="", customer_order="", customer_reward=0, customer_expire=0)
+    add_exp(uid, 10 * qty)
+    check_ach(uid, chat_id)
+    return ("ok", reward, qty, recipe)
+
+
 def do_customer(uid, chat_id):
     p = get_player(uid)
     if not p["active_customer"] or time.time() > (p["customer_expire"] or 0):
-        if random.random() < 0.4:
+        if random.random() < 0.5:
             c = spawn_customer(uid)
             if c:
                 send_message(chat_id, customer_text(c), safe=False); return
@@ -1594,6 +1855,7 @@ def do_customer(uid, chat_id):
          "reward": p["customer_reward"], "expire": p["customer_expire"]}
     send_message(chat_id, customer_text(c), safe=False)
 
+
 def do_serve(uid, chat_id):
     r = fulfill_customer(uid, chat_id)
     if r is None: send_message(chat_id, "🔕 مشتری نداری!"); return
@@ -1603,7 +1865,10 @@ def do_serve(uid, chat_id):
     _, reward, qty, recipe = r
     send_message(chat_id, f"🎉 {qty}x {RECIPES[recipe]['emoji']}\n💰 +{format_money(reward)}")
 
-# ==================== Clan ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🏰 کلن
+# ═══════════════════════════════════════════════════════════
 def get_clan_by_name(name):
     conn = db()
     try:
@@ -1613,6 +1878,7 @@ def get_clan_by_name(name):
         return dict(r) if r else None
     finally: close(conn)
 
+
 def get_user_clan(uid):
     conn = db()
     try:
@@ -1621,6 +1887,7 @@ def get_user_clan(uid):
         r = c.fetchone()
         return dict(r) if r else None
     finally: close(conn)
+
 
 def do_clan_create(uid, chat_id, name):
     name = name.strip()
@@ -1644,6 +1911,7 @@ def do_clan_create(uid, chat_id, name):
     check_badge(uid, chat_id, "clan_owner")
     send_message(chat_id, f"🏰 کلن «{name}» ساخته شد!")
 
+
 def do_clan_join(uid, chat_id, name):
     if get_user_clan(uid):
         send_message(chat_id, "❌ توی کلنی!"); return
@@ -1656,8 +1924,10 @@ def do_clan_join(uid, chat_id, name):
         c.execute(f"INSERT INTO clan_members (clan_id, user_id, joined_at) VALUES ({ph()},{ph()},{ph()})",
                   (clan["id"], uid, time.time()))
         conn.commit()
+    except: pass
     finally: close(conn)
     send_message(chat_id, f"✅ عضو کلن «{name}» شدی!")
+
 
 def do_clan_leave(uid, chat_id):
     clan = get_user_clan(uid)
@@ -1677,6 +1947,7 @@ def do_clan_leave(uid, chat_id):
         conn.commit()
     finally: close(conn)
 
+
 def do_clan_info(uid, chat_id):
     clan = get_user_clan(uid)
     if not clan:
@@ -1691,6 +1962,7 @@ def do_clan_info(uid, chat_id):
                  f"🏰 *کلن {clan['name']}*\n👑 مالک: `{clan['owner_id']}`\n"
                  f"👥 اعضا: {len(members)}\n💰 گنجینه: {format_money(clan['treasury'] or 0)}\n"
                  f"⭐ امتیاز: {clan['points'] or 0}", safe=False)
+
 
 def do_clan_donate(uid, chat_id, amount):
     clan = get_user_clan(uid)
@@ -1709,12 +1981,14 @@ def do_clan_donate(uid, chat_id, amount):
     update_player(uid, money=p["money"] - amount)
     send_message(chat_id, f"✅ {format_money(amount)} به گنجینه اضافه شد!")
 
+
 def do_clan_top(chat_id):
     conn = db()
     try:
         c = conn.cursor()
         c.execute("SELECT name, treasury, points FROM clans ORDER BY points DESC, treasury DESC LIMIT 10")
         rows = c.fetchall()
+    except: rows = []
     finally: close(conn)
     if not rows:
         send_message(chat_id, "هنوز کلنی نیست."); return
@@ -1724,7 +1998,10 @@ def do_clan_top(chat_id):
         txt += f"{medals[i]} {r['name']} — ⭐{r['points'] or 0} — 💰{format_money(r['treasury'] or 0)}\n"
     send_message(chat_id, txt, safe=False)
 
-# ==================== Duel ====================
+
+# ═══════════════════════════════════════════════════════════
+#   ⚔️ دوئل
+# ═══════════════════════════════════════════════════════════
 def do_duel(challenger_id, chat_id, opponent_id, amount):
     if challenger_id == opponent_id:
         send_message(chat_id, "❌ با خودت نمی‌شه!"); return
@@ -1752,67 +2029,10 @@ def do_duel(challenger_id, chat_id, opponent_id, amount):
                  f"⚔️ *دوئل!*\n💰 {format_money(amount)}\n🎲 کمیسیون: {format_money(tax)}\n\n"
                  f"🏆 برنده: {wp['first_name']}\n💰 سود: {format_money(amount - tax)}", safe=False)
 
-# ==================== Missions ====================
-def get_missions(uid):
-    today = today_local().isoformat()
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT missions, completed FROM daily_missions WHERE user_id={ph()} AND day={ph()}", (uid, today))
-        r = c.fetchone()
-        if r: return json.loads(r["missions"]), json.loads(r["completed"])
-        missions = [
-            {"id": "cook", "title": "🍳 بپز", "target": random.randint(3, 8), "reward": random.randint(500, 1500), "progress": 0},
-            {"id": "sell", "title": "💰 فروش بگیر", "target": random.randint(3000, 12000), "reward": random.randint(1000, 2500), "progress": 0},
-            {"id": "buy", "title": "🛒 مواد بخر", "target": random.randint(3, 10), "reward": random.randint(500, 1000), "progress": 0},
-        ]
-        try:
-            if USE_POSTGRES:
-                c.execute(f"INSERT INTO daily_missions (user_id, day, missions, completed) VALUES ({ph()},{ph()},{ph()},{ph()}) ON CONFLICT (user_id, day) DO NOTHING",
-                          (uid, today, json.dumps(missions), json.dumps([])))
-            else:
-                c.execute("INSERT OR REPLACE INTO daily_missions VALUES (?,?,?,?)",
-                          (uid, today, json.dumps(missions), json.dumps([])))
-            conn.commit()
-        except: pass
-        return missions, []
-    finally: close(conn)
 
-def track_mission(uid, kind, value, chat_id):
-    try:
-        today = today_local().isoformat()
-        missions, completed = get_missions(uid)
-        changed = False
-        for m in missions:
-            if m["id"] == kind and m["id"] not in completed:
-                m["progress"] += value
-                if m["progress"] >= m["target"]:
-                    completed.append(m["id"])
-                    p = get_player(uid)
-                    update_player(uid, money=p["money"] + m["reward"])
-                    log_txn(uid, "mission", m["reward"], m["title"])
-                    send_message(chat_id, f"🎯 ماموریت!\n{m['title']} ✅\n💰 +{format_money(m['reward'])}")
-                changed = True
-        if changed:
-            conn = db()
-            try:
-                c = conn.cursor()
-                c.execute(f"UPDATE daily_missions SET missions={ph()}, completed={ph()} WHERE user_id={ph()} AND day={ph()}",
-                          (json.dumps(missions), json.dumps(completed), uid, today))
-                conn.commit()
-            finally: close(conn)
-    except: pass
-
-def do_missions(uid, chat_id):
-    missions, completed = get_missions(uid)
-    txt = "🎯 *ماموریت‌های امروز*\n"
-    for m in missions:
-        done = "✅" if m["id"] in completed else "⏳"
-        bar_len = min(int((m["progress"] / m["target"]) * 10), 10) if m["target"] else 0
-        txt += f"{done} {m['title']}: {m['progress']}/{m['target']} {'█'*bar_len}{'░'*(10-bar_len)} 💰{format_money(m['reward'])}\n"
-    send_message(chat_id, txt, safe=False)
-
-# ==================== Card Transfer ====================
+# ═══════════════════════════════════════════════════════════
+#   💳 کارت به کارت (کاربر به کاربر)
+# ═══════════════════════════════════════════════════════════
 def do_transfer(sender_id, chat_id, receiver_id, amount, sender_name="کاربر"):
     if sender_id == receiver_id:
         send_message(chat_id, "❌ به خودت نمی‌شه!"); return
@@ -1836,7 +2056,10 @@ def do_transfer(sender_id, chat_id, receiver_id, amount, sender_name="کاربر
     try: send_message(receiver_id, f"💳 *پول گرفتی!*\n👤 از: {sender_name}\n💰 +{format_money(amount)}", safe=False)
     except: pass
 
-# ==================== State ====================
+
+# ═══════════════════════════════════════════════════════════
+#   🗂 State
+# ═══════════════════════════════════════════════════════════
 def set_state(uid, state, data=""):
     conn = db()
     try:
@@ -1847,7 +2070,9 @@ def set_state(uid, state, data=""):
         else:
             c.execute("INSERT OR REPLACE INTO user_states VALUES (?,?,?)", (uid, state, json.dumps(data)))
         conn.commit()
+    except: pass
     finally: close(conn)
+
 
 def get_state(uid):
     conn = db()
@@ -1859,7 +2084,9 @@ def get_state(uid):
         try: data = json.loads(r["data"]) if r["data"] else None
         except: data = r["data"]
         return r["state"], data
+    except: return None, None
     finally: close(conn)
+
 
 def clear_state(uid):
     conn = db()
@@ -1867,15 +2094,241 @@ def clear_state(uid):
         c = conn.cursor()
         c.execute(f"DELETE FROM user_states WHERE user_id={ph()}", (uid,))
         conn.commit()
+    except: pass
     finally: close(conn)
-      # ==================== Parser ====================
+
+
+# ═══════════════════════════════════════════════════════════
+#   👑 توابع ادمین (بازنویسی‌شده)
+# ═══════════════════════════════════════════════════════════
+def do_admin_add_money(uid, chat_id, target_id, amount):
+    """افزودن پول نامحدود به کاربر"""
+    if not is_admin(uid): return
+    if amount <= 0:
+        send_message(chat_id, "❌ مقدار باید مثبت باشه!", ADMIN_KB(), safe=False); return
+    tp = get_player(target_id)
+    if not tp:
+        send_message(chat_id, f"❌ کاربر `{target_id}` نیست.", ADMIN_KB(), safe=False); return
+    update_player(target_id, money=tp["money"] + amount)
+    log_txn(target_id, "admin_add", amount, "افزودن ادمین")
+    send_message(chat_id, f"✅ به `{target_id}` {format_money(amount)} اضافه شد.\n💰 موجودی: {format_money(tp['money'] + amount)}", ADMIN_KB(), safe=False)
+    try: send_message(target_id, f"🎁 ادمین {format_money(amount)} بهت داد!")
+    except: pass
+
+
+def do_admin_remove_money(uid, chat_id, target_id, amount):
+    """کم کردن پول کاربر"""
+    if not is_admin(uid): return
+    if amount <= 0:
+        send_message(chat_id, "❌ مقدار باید مثبت باشه!", ADMIN_KB(), safe=False); return
+    tp = get_player(target_id)
+    if not tp:
+        send_message(chat_id, f"❌ کاربر `{target_id}` نیست.", ADMIN_KB(), safe=False); return
+    new_money = max(0, tp["money"] - amount)
+    update_player(target_id, money=new_money)
+    log_txn(target_id, "admin_remove", -amount, "کم کردن ادمین")
+    send_message(chat_id, f"✅ از `{target_id}` {format_money(amount)} کم شد.\n💰 موجودی: {format_money(new_money)}", ADMIN_KB(), safe=False)
+
+
+def do_admin_activate_package(admin_id, chat_id, target_id, package_key):
+    """🆕 فعال‌سازی دستی پکیج برای کاربر"""
+    if not is_admin(admin_id): return
+    pkg = SHOP_PACKAGES.get(package_key)
+    if not pkg:
+        send_message(chat_id, f"❌ پکیج نامعتبر: `{package_key}`\n\nپکیج‌های موجود:\n" + "\n".join([f"`{k}` — {v['name']}" for k, v in SHOP_PACKAGES.items()]), ADMIN_KB(), safe=False)
+        return
+    tp = get_player(target_id)
+    if not tp:
+        send_message(chat_id, f"❌ کاربر `{target_id}` نیست.", ADMIN_KB(), safe=False); return
+
+    # اعمال پکیج
+    ptype = pkg.get("type")
+    msg_parts = [f"✅ پکیج *{pkg['name']}* برای `{target_id}` فعال شد!"]
+
+    if ptype == "coins":
+        coins = pkg.get("coins", 0)
+        update_player(target_id, money=tp["money"] + coins)
+        msg_parts.append(f"💰 +{format_money(coins)} سکه")
+    elif ptype == "vip":
+        vip_type = pkg["vip"]
+        days = pkg.get("days", 30)
+        now = time.time()
+        current_expires = tp.get("vip_expires", 0) or 0
+        base_time = max(now, current_expires)
+        new_expires = base_time + days * 86400
+        new_days = int((new_expires - now) / 86400)
+        update_player(target_id, vip_level=vip_type, vip_expires=new_expires, vip_days_left=new_days)
+        msg_parts.append(f"💎 VIP {VIP_LEVELS[vip_type]['name']} برای {new_days} روز")
+        if vip_type == "diamond": check_badge(target_id, target_id, "vip_diamond")
+        if vip_type == "bronze": check_badge(target_id, target_id, "vip_bronze")
+    elif ptype == "gems":
+        gems = pkg.get("gems", 0)
+        add_gems(target_id, gems, f"پکیج ادمین {package_key}")
+        msg_parts.append(f"💎 +{gems} الماس")
+
+    update_player(target_id, shop_purchases=(tp.get("shop_purchases", 0) or 0) + 1)
+
+    # ثبت در جدول خریدها
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"INSERT INTO user_purchases (user_id, package_key, amount, admin_id, note, ts) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()},{ph()})",
+                  (target_id, package_key, pkg.get("price", 0), admin_id, "فعال‌سازی دستی", time.time()))
+        conn.commit()
+    except Exception as e:
+        log(f"⚠️ user_purchases insert: {e}")
+    finally: close(conn)
+
+    send_message(chat_id, "\n".join(msg_parts), ADMIN_KB(), safe=False)
+    try:
+        send_message(target_id, f"🎁 *پکیج فعال شد!*\n{pkg['name']}\n\n" + "\n".join(msg_parts[1:]), safe=False)
+    except: pass
+
+
+def do_admin_show_purchases(uid, chat_id, target_id):
+    """نمایش خریدهای یه کاربر"""
+    if not is_admin(uid): return
+    tp = get_player(target_id)
+    if not tp:
+        send_message(chat_id, f"❌ کاربر `{target_id}` نیست.", ADMIN_KB(), safe=False); return
+    purchases = get_user_purchases(target_id)
+    txt = f"💳 *خریدهای {tp.get('first_name', '?')}* (`{target_id}`)\n\n"
+    txt += f"💰 موجودی: {format_money(tp['money'])}\n"
+    txt += f"💎 الماس: {tp.get('gems', 0)}\n"
+    txt += f"👑 VIP: {check_vip_status(target_id)}\n\n"
+    if not purchases:
+        txt += "📭 خرید ثبت‌شده‌ای نداره."
+    else:
+        txt += f"📥 *آخرین خریدها ({len(purchases)}):*\n"
+        for p in purchases[:10]:
+            pkg = SHOP_PACKAGES.get(p["package_key"], {"name": p["package_key"]})
+            ts = datetime.fromtimestamp(p["ts"]).strftime("%Y-%m-%d %H:%M")
+            txt += f"• {pkg['name']} — {ts}\n"
+    send_message(chat_id, txt, ADMIN_KB(), safe=False)
+
+
+def do_admin_undo(txn_id, admin_id, chat_id):
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT * FROM admin_txns WHERE id={ph()}", (txn_id,))
+        r = c.fetchone()
+        if not r:
+            send_message(chat_id, "❌ نیست.", ADMIN_KB()); return
+        txn = dict(r)
+        if txn["reversed"]:
+            send_message(chat_id, "❌ قبلاً برگشت خورد.", ADMIN_KB()); return
+        tp = get_player(txn["target_id"])
+        if not tp:
+            send_message(chat_id, "❌ کاربر نیست.", ADMIN_KB()); return
+        update_player(txn["target_id"], money=max(0, tp["money"] - txn["amount"]))
+        c.execute(f"UPDATE admin_txns SET reversed=1 WHERE id={ph()}", (txn_id,))
+        conn.commit()
+    except: pass
+    finally: close(conn)
+    send_message(chat_id, f"✅ برگشت خورد.", ADMIN_KB(), safe=False)
+
+
+def do_reset_all(uid, chat_id):
+    if not is_admin(uid): return
+    conn = db()
+    try:
+        c = conn.cursor()
+        for t in ["players", "achievements", "transactions", "shop_orders", "clans", "clan_members",
+                  "duels", "daily_missions", "admin_txns", "banks", "user_states",
+                  "casino_log", "card_transfers", "discount_codes", "boosters", "reminders",
+                  "lottery", "lottery_winners", "daily_events", "gems_log", "badges",
+                  "referrals", "season_scores", "season_winners", "user_purchases"]:
+            try: c.execute(f"DELETE FROM {t}")
+            except: pass
+        conn.commit()
+    finally: close(conn)
+    send_message(chat_id, "✅ *ریست کلی انجام شد!*", ADMIN_KB(), safe=False)
+
+
+def do_redeem_code(uid, chat_id, code):
+    code = code.strip().upper()
+    if not code:
+        send_message(chat_id, "مثال: `کد WELCOME`"); return
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT * FROM discount_codes WHERE code={ph()}", (code,))
+        r = c.fetchone()
+        if not r:
+            send_message(chat_id, "❌ کد نیست!"); return
+        d = dict(r)
+        if d["uses"] >= d["max_uses"]:
+            send_message(chat_id, "❌ ظرفیت پر!"); return
+        try: used = json.loads(d["used_by"] or "[]")
+        except: used = []
+        if uid in used:
+            send_message(chat_id, "❌ استفاده کردی!"); return
+        p = get_player(uid)
+        amount = d["amount"] or 0
+        update_player(uid, money=p["money"] + amount)
+        used.append(uid)
+        c.execute(f"UPDATE discount_codes SET uses=uses+1, used_by={ph()} WHERE code={ph()}",
+                  (json.dumps(used), code))
+        conn.commit()
+    except: pass
+    finally: close(conn)
+    send_message(chat_id, f"✅ کد فعال!\n💰 +{format_money(amount)}")
+
+
+def do_admin_create_code(uid, chat_id, code, amount, max_uses=1):
+    if not is_admin(uid): return
+    code = code.strip().upper()
+    if not code or amount <= 0:
+        send_message(chat_id, "فرمت: `کد بساز WELCOME 5000 10`"); return
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute(f"SELECT code FROM discount_codes WHERE code={ph()}", (code,))
+        if c.fetchone():
+            send_message(chat_id, f"❌ وجود داره.", ADMIN_KB(), safe=False); return
+        c.execute(f"INSERT INTO discount_codes (code, amount, max_uses, created_by, created_at, used_by) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()},'[]')",
+                  (code, amount, max_uses, uid, time.time()))
+        conn.commit()
+    finally: close(conn)
+    send_message(chat_id, f"✅ کد `{code}` ساخته شد!", ADMIN_KB(), safe=False)
+
+
+def do_admin_list_codes(uid, chat_id):
+    if not is_admin(uid): return
+    conn = db()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM discount_codes ORDER BY created_at DESC LIMIT 15")
+        rows = c.fetchall()
+    except: rows = []
+    finally: close(conn)
+    if not rows:
+        send_message(chat_id, "🎟 کدی نیست.", ADMIN_KB()); return
+    txt = "🎟 *کدها*\n"
+    for r in rows:
+        txt += f"• `{r['code']}` — {format_money(r['amount'])} ({r['uses']}/{r['max_uses']})\n"
+    send_message(chat_id, txt, ADMIN_KB(), safe=False)
+
+
+# ═══════════════════════════════════════════════════════════
+#   🔍 پارسر دستورات
+# ═══════════════════════════════════════════════════════════
+def _match_recipe(text):
+    """تشخیص کلید غذا از متن کاربر"""
+    for alias, key in RECIPE_ALIASES.items():
+        if alias in text:
+            return key
+    return None
+
+
 def parse_text_command(uid, chat_id, first_name, username, text):
     text = normalize_numbers(text)
     if text.startswith(("خرید", "بخر", "آشپزی", "بپز", "فروش", "بفروش", "جایزه", "گردونه",
                         "آپگرید", "مشتری", "تحویل", "کازینو", "اسلات", "جعبه",
                         "کارت", "انتقال", "بوستر", "کد", "لاتاری", "مهارت", "پت",
                         "هدیه", "الماس", "رتبه", "پروفایل", "فروشگاه", "دعوت", "نشان",
-                        "کار", "شغل", "وی‌آی‌پی", "vip")):
+                        "کار", "شغل", "وی‌آی‌پی", "vip", "خریدهای")):
         if not check_user_cooldown(uid):
             return True
     p = get_player(uid)
@@ -1888,39 +2341,42 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     nums = re.findall(r'\d+', t)
     qty = int(nums[0]) if nums else 1
 
+    # خرید
     if t.startswith("خرید") or t.startswith("بخر"):
         if "آرد" in t: do_buy(uid, chat_id, "flour", qty); return True
         if "نخود" in t: do_buy(uid, chat_id, "chickpeas", qty); return True
         if "روغن" in t: do_buy(uid, chat_id, "oil", qty); return True
-        if "پنیر" in t: do_buy(uid, chat_id, "cheese", qty); return True
+        if "پنیر" in t and "فلافل" not in t: do_buy(uid, chat_id, "cheese", qty); return True
         if "ادویه" in t: do_buy(uid, chat_id, "spice", qty); return True
-        send_message(chat_id, "🛒 `خرید آرد ۵` | `خرید نخود ۳` | ...", safe=False)
+        if "کاهو" in t: do_buy(uid, chat_id, "lettuce", qty); return True
+        if "خیار" in t: do_buy(uid, chat_id, "cucumber", qty); return True
+        if "گوجه" in t: do_buy(uid, chat_id, "tomato", qty); return True
+        if "گوشت" in t: do_buy(uid, chat_id, "burger_meat", qty); return True
+        if "خمیر" in t: do_buy(uid, chat_id, "pizza_dough", qty); return True
+        if "سس" in t: do_buy(uid, chat_id, "sauce", qty); return True
+        if "قارچ" in t: do_buy(uid, chat_id, "mushroom", qty); return True
+        if "سوسیس" in t: do_buy(uid, chat_id, "sausage", qty); return True
+        send_message(chat_id, "🛒 `خرید آرد ۵` | `خرید کاهو ۳` | `خرید گوشت ۲` | ...", safe=False)
         return True
 
+    # آشپزی
     if t.startswith("آشپزی") or t.startswith("بپز") or t.startswith("پخت"):
-        if "ساندویچ" in t: do_cook(uid, chat_id, "sandwich"); return True
-        if "دلوکس" in t or "لوکس" in t: do_cook(uid, chat_id, "deluxe"); return True
-        if "پنیر" in t: do_cook(uid, chat_id, "cheese"); return True
-        if "تند" in t: do_cook(uid, chat_id, "spicy"); return True
-        if "حرفه" in t or "مخصوص" in t or "ویژه" in t: do_cook(uid, chat_id, "special"); return True
-        if "ساده" in t or "معمولی" in t: do_cook(uid, chat_id, "simple"); return True
-        send_message(chat_id, "🍳 `آشپزی ساده` | `آشپزی حرفه‌ای` | ...", safe=False)
+        key = _match_recipe(t)
+        if key: do_cook(uid, chat_id, key); return True
+        send_message(chat_id, "🍳 `آشپزی ساده` | `آشپزی پیتزا` | `آشپزی همبرگر` | ...", safe=False)
         return True
 
+    # فروش
     if t.startswith("فروش") or t.startswith("بفروش"):
         if "همه" in t or "کل" in t: do_sell(uid, chat_id, "all"); return True
-        if "ساندویچ" in t: do_sell(uid, chat_id, "sandwich"); return True
-        if "دلوکس" in t: do_sell(uid, chat_id, "deluxe"); return True
-        if "پنیر" in t: do_sell(uid, chat_id, "cheese"); return True
-        if "تند" in t: do_sell(uid, chat_id, "spicy"); return True
-        if "حرفه" in t or "مخصوص" in t: do_sell(uid, chat_id, "special"); return True
-        if "ساده" in t: do_sell(uid, chat_id, "simple"); return True
-        send_message(chat_id, "💰 `فروش همه`")
+        key = _match_recipe(t)
+        if key: do_sell(uid, chat_id, key); return True
+        send_message(chat_id, "💰 `فروش همه` یا `فروش پیتزا`")
         return True
 
     if t.startswith("جایزه") or t.startswith("پاداش"):
         do_daily(uid, chat_id); return True
-    if t.startswith("گردونه") or "گردونه" in t:
+    if t.startswith("گردونه"):
         do_spin(uid, chat_id); return True
     if t.startswith("آپگرید") or t.startswith("ارتقا"):
         if "تنور" in t: do_upgrade(uid, chat_id, "oven"); return True
@@ -1939,6 +2395,7 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     if t.startswith("ماموریت"):
         do_missions(uid, chat_id); return True
 
+    # بانک
     if t.startswith("بانک"):
         body = t[4:].strip()
         amt = int(nums[0]) if nums else 0
@@ -1949,6 +2406,7 @@ def parse_text_command(uid, chat_id, first_name, username, text):
         if body.startswith("جمع") or body.startswith("سود"): do_bank_collect(uid, chat_id); return True
         do_bank(uid, chat_id, first_name); return True
 
+    # کازینو
     if t.startswith("کازینو"):
         body = t[6:].strip()
         if not nums:
@@ -2000,12 +2458,16 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     if t.startswith("دعوت"):
         referral_panel(uid, chat_id); return True
 
-    if t.startswith("نشان") or t.startswith("badge"):
+    if t.startswith("نشان"):
         badges_panel(uid, chat_id); return True
 
     if t.startswith("کار") or t.startswith("شغل"):
         do_work(uid, chat_id); return True
 
+    if t.startswith("خریدهای") or t.startswith("خرید های"):
+        do_my_purchases(uid, chat_id); return True
+
+    # هدیه
     if t.startswith("هدیه"):
         nums_h = re.findall(r'\d+', t)
         if len(nums_h) >= 2:
@@ -2080,24 +2542,25 @@ def parse_text_command(uid, chat_id, first_name, username, text):
     if t.startswith("راهنما") or t == "کمک":
         send_message(chat_id,
                      "📋 *دستورات*\n"
-                     "🛒 `خرید آرد ۵` | 🍳 `آشپزی ساده` | 💰 `فروش همه`\n"
-                     "🎁 `جایزه روزانه` | 🎰 `گردونه` | 🎰 `اسلات ۵۰۰۰`\n"
-                     "🏦 `بانک` | ⚙️ `آپگرید تنور` | 👤 `پروفایل`\n"
-                     "🔔 `مشتری` | ✅ `تحویل بده` | 🎯 `ماموریت`\n"
+                     "🛒 `خرید آرد ۵` | `خرید کاهو ۳`\n"
+                     "🍳 `آشپزی ساده` | `آشپزی پیتزا` | `آشپزی همبرگر`\n"
+                     "💰 `فروش همه` | 🎁 `جایزه روزانه` | 🎰 `گردونه`\n"
+                     "🎰 `اسلات ۵۰۰۰` | 🏦 `بانک` | ⚙️ `آپگرید تنور`\n"
+                     "👤 `پروفایل` | 🔔 `مشتری` | ✅ `تحویل بده` | 🎯 `ماموریت`\n"
                      "🎫 `لاتاری` | 🎓 `مهارت‌ها` | 🐔 `پت`\n"
                      "💎 `الماس` | ⚡ `بوستر بخر` | 🎁 `جعبه`\n"
-                     "🛍 `فروشگاه` | 👥 `دعوت` | 🏅 `نشان‌ها`\n"
-                     "💼 `کار`\n"
-                     "💳 `کارت به کارت ID مبلغ` (یا ریپلای)\n"
-                     "🎟 `کد WELCOME` | 🏰 `کلن بساز [اسم]`\n"
-                     "⚔️ ریپلای + `دوئل ۵۰۰۰`\n\n"
+                     "🛍 `فروشگاه` | 👥 `دعوت` | 🏅 `نشان‌ها` | 💼 `کار`\n"
+                     "💳 `کارت به کارت ID مبلغ` | 🎟 `کد WELCOME`\n"
+                     "🏰 `کلن بساز [اسم]` | ⚔️ ریپلای + `دوئل ۵۰۰۰`\n\n"
                      "🎮 `/game` — منوی گروه", safe=False)
         return True
 
     return False
 
 
-# ==================== Work ====================
+# ═══════════════════════════════════════════════════════════
+#   💼 کار
+# ═══════════════════════════════════════════════════════════
 def do_work(uid, chat_id):
     p = get_player(uid)
     now = time.time()
@@ -2115,30 +2578,124 @@ def do_work(uid, chat_id):
         "👷 یه کار نیمه‌وقت گرفتی",
         "📦 یه بار بسته‌بندی انجام دادی",
         "🍔 به یکی فلافل فروختی",
+        "🍕 یه پیتزا پیک رسوندی",
         "🚚 یه سفارش پیک رسوندی",
     ]
     send_message(chat_id, f"{random.choice(msgs)}\n💰 +{format_money(total)}")
     check_ach(uid, chat_id)
 
 
-# ==================== Shop Panel ====================
+def do_my_purchases(uid, chat_id):
+    purchases = get_user_purchases(uid)
+    if not purchases:
+        send_message(chat_id, "📭 هنوز خریدی نداری."); return
+    txt = "💳 *خریدهای من*\n\n"
+    for p in purchases[:15]:
+        pkg = SHOP_PACKAGES.get(p["package_key"], {"name": p["package_key"]})
+        ts = datetime.fromtimestamp(p["ts"]).strftime("%Y-%m-%d")
+        txt += f"• {pkg['name']} — {ts}\n"
+    send_message(chat_id, txt, safe=False)
+
+
+# ═══════════════════════════════════════════════════════════
+#   🛍 فروشگاه (کاربر)
+# ═══════════════════════════════════════════════════════════
 def shop_panel(uid, chat_id):
     txt = "🛍 *فروشگاه*\n━━━━━━━━━━━━━━━\n\n"
     txt += "💡 *برای خرید، روی دکمه زیر بزن و به پیوی مالک پیام بده*\n\n"
+    rows = []
     for key, pkg in SHOP_PACKAGES.items():
         txt += f"• {pkg['name']}\n"
         if "price" in pkg: txt += f"  💵 {format_money(pkg['price'])} تومان\n"
         if "coins" in pkg: txt += f"  🪙 {format_money(pkg['coins'])} سکه\n"
+        if "gems" in pkg: txt += f"  💎 {pkg['gems']} الماس\n"
         txt += "\n"
-    txt += f"📞 *پیوی مالک:* {OWNER_USERNAME}\n\n"
+        rows.append([{"text": pkg['name'], "callback_data": f"shop:{key}"}])
+    txt += f"📞 *پیوی مالک:* {OWNER_USERNAME}\n"
     txt += f"🆔 آیدی عددی مالک: `{ADMIN_IDS[0] if ADMIN_IDS else 'نامشخص'}`"
-    jk = {"inline_keyboard": [
-        [{"text": "💬 ارسال پیام به مالک", "url": f"https://ble.ir/{OWNER_USERNAME.lstrip('@')}"}]
-    ]}
+    rows.append([{"text": "💬 ارسال پیام به مالک", "url": f"https://ble.ir/{OWNER_USERNAME.lstrip('@')}"}])
+    jk = {"inline_keyboard": rows}
     send_message(chat_id, txt, jk, safe=False)
 
 
-# ==================== Keyboards ====================
+# ═══════════════════════════════════════════════════════════
+#   🏦 بانک (توابع نمایشی)
+# ═══════════════════════════════════════════════════════════
+def do_bank(uid, chat_id, first_name):
+    profit = collect_bank_profit(uid)
+    b = get_bank(uid)
+    txt = (f"🏦 *بانک*\n━━━━━━━━━━━━━━━\n👤 {first_name}\n\n"
+           f"💰 موجودی: {format_money(b['balance'])} تومان\n"
+           f"📈 سرمایه: {format_money(b['invested'])} تومان\n"
+           f"💵 سود کل: {format_money(b['total_profit'])} تومان\n\n")
+    if profit > 0: txt += f"🎉 *سود جدید:* +{format_money(profit)}\n\n"
+    txt += ("📊 سود روزانه: ۲۰٪\n\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n"
+            "`بانک سرمایه ۵۰۰۰`\n`بانک پایان ۵۰۰۰`\n`بانک جمع`")
+    send_message(chat_id, txt, safe=False)
+
+
+def do_bank_deposit(uid, chat_id, amount):
+    p = get_player(uid)
+    if amount <= 0 or p["money"] < amount:
+        send_message(chat_id, "❌ پول کافی نداری!"); return
+    b = get_bank(uid)
+    if b["balance"] + amount > BANK_MAX_BALANCE:
+        send_message(chat_id, f"❌ سقف {format_money(BANK_MAX_BALANCE)}"); return
+    update_player(uid, money=p["money"] - amount)
+    update_bank(uid, balance=b["balance"] + amount)
+    send_message(chat_id, f"✅ {format_money(amount)} واریز شد.")
+
+
+def do_bank_withdraw(uid, chat_id, amount):
+    b = get_bank(uid)
+    if amount <= 0 or b["balance"] < amount:
+        send_message(chat_id, "❌ حساب کافی نیست!"); return
+    p = get_player(uid)
+    update_player(uid, money=p["money"] + amount)
+    update_bank(uid, balance=b["balance"] - amount)
+    send_message(chat_id, f"✅ {format_money(amount)} برداشت شد.")
+
+
+def do_bank_invest(uid, chat_id, amount):
+    p = get_player(uid)
+    if amount < BANK_MIN_INVEST or p["money"] < amount:
+        send_message(chat_id, f"❌ حداقل {format_money(BANK_MIN_INVEST)}"); return
+    collect_bank_profit(uid)
+    b = get_bank(uid)
+    now = time.time()
+    update_player(uid, money=p["money"] - amount)
+    update_bank(uid, invested=b["invested"] + amount, last_invest=now,
+                last_collect=b["last_collect"] if b["last_collect"] > 0 else now)
+    send_message(chat_id, f"📈 {format_money(amount)} سرمایه‌گذاری شد!")
+
+
+def do_bank_end_invest(uid, chat_id, amount):
+    b = get_bank(uid)
+    if amount <= 0 or b["invested"] < amount:
+        send_message(chat_id, "❌ سرمایه کافی نیست!"); return
+    collect_bank_profit(uid)
+    b = get_bank(uid)
+    update_bank(uid, invested=b["invested"] - amount, balance=b["balance"] + amount)
+    send_message(chat_id, f"✅ {format_money(amount)} برگشت.")
+
+
+def do_bank_collect(uid, chat_id):
+    profit = collect_bank_profit(uid)
+    if profit > 0:
+        send_message(chat_id, f"🎉 *سود:* +{format_money(profit)}")
+    else:
+        b = get_bank(uid)
+        if b["invested"] <= 0:
+            send_message(chat_id, "❌ سرمایه‌ای نداری!\n`بانک سرمایه ۵۰۰۰`")
+        else:
+            ref = b["last_collect"] if b["last_collect"] > 0 else b["last_invest"]
+            left = max(0, 86400 - (time.time() - ref))
+            send_message(chat_id, f"⏰ بعدی: {int(left//3600)}س {int((left%3600)//60)}د")
+
+
+# ═══════════════════════════════════════════════════════════
+#   ⌨️ کیبوردها
+# ═══════════════════════════════════════════════════════════
 def kb(rows):
     return {"keyboard": [[{"text": t} for t in row] for row in rows], "resize_keyboard": True}
 
@@ -2163,10 +2720,11 @@ def PRIVATE_KB(uid=None):
 def ADMIN_KB():
     return kb([
         ["📥 سفارشات", "📊 آمار کل"],
-        ["💰 افزودن پول", "💳 کارت به کارت ادمین"],
-        ["🎁 هدیه همگانی", "🎟 کد تخفیف"],
-        ["📢 پیام همگانی", "🗑 ریست کلی"],
-        ["🔙 بازگشت"]
+        ["💰 افزودن پول", "💸 کم کردن پول"],
+        ["🎁 فعال‌سازی پکیج", "📋 لیست پکیج‌ها"],
+        ["🔍 بررسی کاربر", "🎟 کد تخفیف"],
+        ["📢 پیام همگانی", "🎁 هدیه همگانی"],
+        ["🗑 ریست کلی", "🔙 بازگشت"]
     ])
 
 
@@ -2188,40 +2746,44 @@ def GROUP_KB():
 
 
 GUIDES = {
-    "buy": "🛒 *خرید*\n\n`خرید آرد ۵`\n`خرید نخود ۳`\n`خرید روغن ۲`\n`خرید پنیر ۳`\n`خرید ادویه ۳`",
-    "cook": "🍳 *آشپزی*\n\n`آشپزی ساده` 🟡\n`آشپزی حرفه‌ای` 🟠\n`آشپزی ساندویچ` 🥙\n`آشپزی پنیری` 🧀\n`آشپزی تند` 🌶\n`آشپزی دلوکس` 👑",
-    "sell": "💰 *فروش*\n\n`فروش همه`\n`فروش ساده` | `فروش مخصوص`",
+    "buy": "🛒 *خرید*\n\n`خرید آرد ۵`\n`خرید کاهو ۳`\n`خرید گوشت ۲`\n`خرید خمیر ۳`\n`خرید سوسیس ۲`",
+    "cook": "🍳 *آشپزی*\n\n`آشپزی ساده` 🟡\n`آشپزی مخصوص` 🟠\n`آشپزی پیتزا` 🍕\n`آشپزی همبرگر` 🍔\n`آشپزی هات‌داگ` 🌭\n`آشپزی سالاد` 🥗",
+    "sell": "💰 *فروش*\n\n`فروش همه`\n`فروش پیتزا` | `فروش همبرگر`",
     "daily": "🎁 *جایزه روزانه*\n\n`جایزه روزانه`",
-    "spin": "🎰 *گردونه*\n\n`گردونه شانس`",
+    "spin": "🎰 *گردونه*\n\n`گردونه`",
     "up": "⚙️ *آپگرید*\n\n`آپگرید تنور` 🔥\n`آپگرید مخلوط‌کن` 🥣\n`آپگرید پیشخوان` 🏪",
     "me": "👤 *پروفایل*\n\n`پروفایل`",
     "top": "🏆 *رتبه*\n\n`رتبه`",
     "cust": "🔔 *مشتری*\n\n`مشتری` | `تحویل بده`",
-    "clan": "🏰 *کلن*\n\n`کلن بساز [اسم]`\n`کلن عضو شو [اسم]`\n`کلن من`\n`کلن لیست`\n`کلن اهدا ۵۰۰۰`\n`کلن خروج`",
+    "clan": "🏰 *کلن*\n\n`کلن بساز [اسم]`\n`کلن عضو شو [اسم]`\n`کلن من`\n`کلن لیست`",
     "duel": "⚔️ *دوئل*\n\nروی پیام حریف ریپلای کن:\n`دوئل ۵۰۰۰`",
     "mission": "🎯 *ماموریت*\n\n`ماموریت`",
     "bank": "🏦 *بانک*\n\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n`بانک سرمایه ۵۰۰۰`\n`بانک جمع`",
-    "casino": "🎰 *کازینو*\n\n`کازینو ۵۰۰۰ شیر`\n`کازینو ۵۰۰۰ خط`",
+    "casino": "🎰 *کازینو*\n\n`کازینو ۵۰۰۰ شیر`",
     "slot": "🎰 *اسلات*\n\n`اسلات ۵۰۰۰`",
     "boost": "⚡ *بوستر*\n\n`بوستر بخر` — ۵,۰۰۰",
     "lottery": "🎫 *لاتاری*\n\n`لاتاری` | `لاتاری بخر`",
     "skills": "🎓 *مهارت*\n\n`مهارت‌ها`\n`مهارت بخر cook`",
     "pet": "🐔 *پت*\n\n`پت` | `پت بخر` | `پت غذا بده`",
-    "gems": "💎 *فروشگاه الماس*\n\n`الماس`\n`الماس بخر booster`",
+    "gems": "💎 *الماس*\n\n`الماس`\n`الماس بخر booster`",
     "shop": "🛍 *فروشگاه*\n\n`فروشگاه`",
-    "vip": "💎 *VIP*\n\n`وی‌آی‌پی` یا `VIP`\n\nسطوح: برنزی، نقره‌ای، طلایی، الماسی",
+    "vip": "💎 *VIP*\n\n`وی‌آی‌پی`\nسطوح: برنزی، نقره‌ای، طلایی، الماسی",
     "ref": "👥 *دعوت*\n\n`دعوت` — لینک دعوتت رو بگیر",
-    "badges": "🏅 *نشان‌ها*\n\n`نشان‌ها` — لیست نشان‌ها",
-    "work": "💼 *کار*\n\n`کار` — هر ۱ ساعت، یه بار",
+    "badges": "🏅 *نشان‌ها*\n\n`نشان‌ها`",
+    "work": "💼 *کار*\n\n`کار` — هر ۱ ساعت",
 }
 
 
-# ==================== Admin Text Handler ====================
+# ═══════════════════════════════════════════════════════════
+#   👑 پنل ادمین (Text handler)
+# ═══════════════════════════════════════════════════════════
 def handle_admin_text(chat_id, uid, text):
     if not is_admin(uid):
         return False
+
     if text in ("📥 سفارشات", "📥 خریدهای در انتظار"):
         show_pending_orders(chat_id, uid); return True
+
     if text == "📊 آمار کل":
         conn = db()
         try:
@@ -2229,7 +2791,8 @@ def handle_admin_text(chat_id, uid, text):
             c.execute("SELECT COUNT(*) c FROM players")
             t = c.fetchone()["c"]
             c.execute("SELECT SUM(total_earned) s FROM players")
-            earned = c.fetchone()["s"] or 0
+            row = c.fetchone()
+            earned = (row["s"] if row else 0) or 0
             c.execute("SELECT COUNT(*) c FROM duels")
             duels = c.fetchone()["c"]
             c.execute("SELECT COUNT(*) c FROM clans")
@@ -2240,27 +2803,54 @@ def handle_admin_text(chat_id, uid, text):
             vips = c.fetchone()["c"]
             c.execute("SELECT COUNT(*) c FROM referrals")
             refs = c.fetchone()["c"]
-        finally:
-            close(conn)
+            c.execute("SELECT COUNT(*) c FROM user_purchases")
+            purchases = c.fetchone()["c"]
+        finally: close(conn)
         send_message(chat_id,
                      f"📊 *آمار کل*\n👥 بازیکن: {t}\n📈 درآمد: {format_money(earned)}\n"
                      f"⚔️ دوئل: {duels}\n🏰 کلن: {clans}\n🎟 کد: {codes}\n"
-                     f"💎 VIP: {vips}\n👥 دعوت: {refs}",
+                     f"💎 VIP: {vips}\n👥 دعوت: {refs}\n💳 خرید: {purchases}",
                      ADMIN_KB(), safe=False)
         return True
+
     if text == "💰 افزودن پول":
-        send_message(chat_id, "`ADDMONEY ID مبلغ` (تا ۱۰۰,۰۰۰)", ADMIN_KB(), safe=False)
+        send_message(chat_id, "`ADDMONEY ID مبلغ` — بدون محدودیت\nمثال: `ADDMONEY 123456789 500000`", ADMIN_KB(), safe=False); return True
+
+    if text == "💸 کم کردن پول":
+        send_message(chat_id, "`REMOVE ID مبلغ` — کم کردن پول کاربر", ADMIN_KB(), safe=False); return True
+
+    if text == "🎁 فعال‌سازی پکیج":
+        send_message(chat_id,
+                     "🎁 *فعال‌سازی دستی پکیج*\n\n"
+                     "فرمت: `ACTIVATE ID package_key`\n\n"
+                     "مثال: `ACTIVATE 123456789 vip_gold`\n\n"
+                     "برای دیدن پکیج‌ها: `📋 لیست پکیج‌ها` رو بزن",
+                     ADMIN_KB(), safe=False)
         return True
-    if text == "💳 کارت به کارت ادمین":
-        send_message(chat_id, "`CARD ID مبلغ` (تا ۱۰۰,۰۰۰)", ADMIN_KB(), safe=False); return True
+
+    if text == "📋 لیست پکیج‌ها":
+        txt = "📋 *پکیج‌های موجود:*\n\n"
+        for k, v in SHOP_PACKAGES.items():
+            txt += f"`{k}`\n  {v['name']} — {format_money(v.get('price', 0))} تومان\n\n"
+        send_message(chat_id, txt, ADMIN_KB(), safe=False)
+        return True
+
+    if text == "🔍 بررسی کاربر":
+        send_message(chat_id, "`INFO ID` — نمایش اطلاعات کامل کاربر\n`PAID ID` — نمایش خریدهای کاربر\n`SEARCH نام` — جستجو", ADMIN_KB(), safe=False)
+        return True
+
     if text == "🎟 کد تخفیف":
         send_message(chat_id, "`کد بساز CODE مبلغ تعداد` | `کد لیست`", ADMIN_KB(), safe=False); return True
+
     if text == "🗑 ریست کلی":
         send_message(chat_id, "⚠️ تایید: `RESETALL`", ADMIN_KB(), safe=False); return True
+
     if text == "🎁 هدیه همگانی":
-        send_message(chat_id, "`GIFT مبلغ`", ADMIN_KB(), safe=False); return True
+        send_message(chat_id, "`GIFT مبلغ` — به همه کاربرا", ADMIN_KB(), safe=False); return True
+
     if text == "📢 پیام همگانی":
         send_message(chat_id, "`ALL متن`", ADMIN_KB(), safe=False); return True
+
     if text == "🔙 بازگشت":
         send_message(chat_id, "منوی اصلی:", PRIVATE_KB(uid)); return True
 
@@ -2268,34 +2858,57 @@ def handle_admin_text(chat_id, uid, text):
     if not parts:
         return False
 
-    if parts[0].upper() == "ADDMONEY" and len(parts) >= 3 and parts[1].isdigit():
+    cmd = parts[0].upper()
+
+    # ADDMONEY - بدون محدودیت
+    if cmd == "ADDMONEY" and len(parts) >= 3 and parts[1].isdigit():
         try: amt = int(parts[2])
         except: return True
         do_admin_add_money(uid, chat_id, int(parts[1]), amt); return True
 
-    if parts[0].upper() == "CARD" and len(parts) >= 3 and parts[1].isdigit():
+    # REMOVE - کم کردن پول
+    if cmd == "REMOVE" and len(parts) >= 3 and parts[1].isdigit():
         try: amt = int(parts[2])
         except: return True
-        do_admin_transfer(uid, chat_id, int(parts[1]), amt); return True
+        do_admin_remove_money(uid, chat_id, int(parts[1]), amt); return True
 
-    if parts[0].upper() == "SUB" and len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
-        amt = int(parts[2])
+    # ACTIVATE - فعال‌سازی دستی پکیج
+    if cmd == "ACTIVATE" and len(parts) >= 3 and parts[1].isdigit():
+        do_admin_activate_package(uid, chat_id, int(parts[1]), parts[2]); return True
+
+    # PAID - نمایش خریدهای کاربر
+    if cmd == "PAID" and len(parts) >= 2 and parts[1].isdigit():
+        do_admin_show_purchases(uid, chat_id, int(parts[1])); return True
+
+    # INFO - اطلاعات کامل کاربر
+    if cmd == "INFO" and len(parts) >= 2 and parts[1].isdigit():
         tp = get_player(int(parts[1]))
-        if tp and tp["money"] >= amt:
-            update_player(int(parts[1]), money=tp["money"] - amt)
-            send_message(chat_id, f"✅ از `{parts[1]}` {format_money(amt)} کم شد.", ADMIN_KB(), safe=False)
+        if not tp:
+            send_message(chat_id, "❌ کاربر نیست.", ADMIN_KB(), safe=False); return True
+        txt = (f"👤 *اطلاعات کاربر*\n"
+               f"🆔 `{tp['user_id']}`\n"
+               f"📝 {tp.get('first_name', '?')}\n"
+               f"💰 {format_money(tp['money'])}\n"
+               f"💎 {tp.get('gems', 0)}\n"
+               f"⭐ سطح {tp['level']}\n"
+               f"👑 VIP: {check_vip_status(tp['user_id'])}\n"
+               f"🔥 استریک: {tp.get('daily_streak', 0)}\n"
+               f"📦 فروش کل: {tp.get('total_sold', 0)}\n"
+               f"💵 درآمد کل: {format_money(tp.get('total_earned', 0))}")
+        send_message(chat_id, txt, ADMIN_KB(), safe=False)
         return True
 
-    if parts[0].upper() == "UNDO" and len(parts) >= 2 and parts[1].isdigit():
+    if cmd == "UNDO" and len(parts) >= 2 and parts[1].isdigit():
         do_admin_undo(int(parts[1]), uid, chat_id); return True
 
-    if parts[0].upper() == "SEARCH" and len(parts) >= 2:
+    if cmd == "SEARCH" and len(parts) >= 2:
         q = " ".join(parts[1:])
         conn = db()
         try:
             c = conn.cursor()
             c.execute(f"SELECT user_id, first_name, money FROM players WHERE first_name LIKE {ph()} LIMIT 10", (f"%{q}%",))
             rows = c.fetchall()
+        except: rows = []
         finally: close(conn)
         if not rows:
             send_message(chat_id, "❌ نیست.", ADMIN_KB()); return True
@@ -2305,7 +2918,7 @@ def handle_admin_text(chat_id, uid, text):
         send_message(chat_id, txt, ADMIN_KB(), safe=False)
         return True
 
-    if parts[0].upper() == "RESET" and len(parts) >= 2 and parts[1].isdigit():
+    if cmd == "RESET" and len(parts) >= 2 and parts[1].isdigit():
         tid = int(parts[1])
         conn = db()
         try:
@@ -2316,8 +2929,8 @@ def handle_admin_text(chat_id, uid, text):
                                ("banks", "user_id"), ("boosters", "user_id"),
                                ("reminders", "user_id"), ("lottery", "user_id"),
                                ("gems_log", "user_id"), ("badges", "user_id"),
-                               ("referrals", "referrer_id"), ("referrals", "referred_id"),
-                               ("season_scores", "user_id")]:
+                               ("user_purchases", "user_id"),
+                               ("referrals", "referrer_id"), ("referrals", "referred_id")]:
                 try: c.execute(f"DELETE FROM {table} WHERE {col}={ph()}", (tid,))
                 except: pass
             try:
@@ -2333,7 +2946,7 @@ def handle_admin_text(chat_id, uid, text):
     if text.upper() == "RESETALL":
         do_reset_all(uid, chat_id); return True
 
-    if parts[0].upper() == "ALL" and len(text) > 4:
+    if cmd == "ALL" and len(text) > 4:
         msg_text = text[4:].strip()
         conn = db()
         try:
@@ -2349,7 +2962,7 @@ def handle_admin_text(chat_id, uid, text):
         send_message(chat_id, f"✅ به {sent} نفر.", ADMIN_KB())
         return True
 
-    if parts[0].upper() == "GIFT" and len(parts) >= 2 and parts[1].isdigit():
+    if cmd == "GIFT" and len(parts) >= 2 and parts[1].isdigit():
         amt = int(parts[1])
         conn = db()
         try:
@@ -2364,293 +2977,15 @@ def handle_admin_text(chat_id, uid, text):
                 update_player(x, money=tp["money"] + amt)
                 cnt += 1
             time.sleep(0.05)
-        send_message(chat_id, f"✅ به {cnt} نفر.", ADMIN_KB())
+        send_message(chat_id, f"✅ به {cnt} نفر {format_money(amt)} داده شد.", ADMIN_KB())
         return True
 
     return False
 
 
-# ==================== Admin Functions ====================
-def do_admin_add_money(uid, chat_id, target_id, amount):
-    if not is_admin(uid): return
-    if amount <= 0 or amount > ADMIN_MONEY_LIMIT:
-        send_message(chat_id, f"❌ ۱ تا {format_money(ADMIN_MONEY_LIMIT)}!"); return
-    tp = get_player(target_id)
-    if not tp:
-        send_message(chat_id, f"❌ `{target_id}` نیست.", ADMIN_KB(), safe=False); return
-    update_player(target_id, money=tp["money"] + amount)
-    log_txn(target_id, "admin_add", amount, "افزودن ادمین")
-    send_message(chat_id, f"✅ به `{target_id}` {format_money(amount)} اضافه شد.", ADMIN_KB(), safe=False)
-    try: send_message(target_id, f"🎁 ادمین {format_money(amount)} بهت داد!")
-    except: pass
-
-
-def do_admin_transfer(admin_id, chat_id, receiver_id, amount, note=""):
-    if not is_admin(admin_id): return
-    if amount <= 0 or amount > ADMIN_MONEY_LIMIT:
-        send_message(chat_id, f"❌ ۱ تا {format_money(ADMIN_MONEY_LIMIT)}!", ADMIN_KB()); return
-    rp = get_player(receiver_id)
-    if not rp:
-        send_message(chat_id, f"❌ `{receiver_id}` پیدا نشد.", ADMIN_KB(), safe=False); return
-    update_player(receiver_id, money=rp["money"] + amount)
-    log_txn(receiver_id, "admin_transfer", amount, "ادمین")
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"INSERT INTO admin_txns (target_id, admin_id, amount, note, ts) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()})",
-                  (receiver_id, admin_id, amount, note or "کارت به کارت ادمین", time.time()))
-        c.execute(f"SELECT id FROM admin_txns WHERE target_id={ph()} ORDER BY id DESC LIMIT 1", (receiver_id,))
-        txn_id = c.fetchone()["id"]
-        conn.commit()
-    except: txn_id = 0
-    finally: close(conn)
-    send_message(chat_id, f"✅ به `{receiver_id}` {format_money(amount)}\n🆔 برگشت: `{txn_id}`", ADMIN_KB(), safe=False)
-    try: send_message(receiver_id, f"💳 ادمین {format_money(amount)} بهت داد!")
-    except: pass
-
-
-def do_admin_undo(txn_id, admin_id, chat_id):
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT * FROM admin_txns WHERE id={ph()}", (txn_id,))
-        r = c.fetchone()
-        if not r:
-            send_message(chat_id, "❌ نیست.", ADMIN_KB()); return
-        txn = dict(r)
-        if txn["reversed"]:
-            send_message(chat_id, "❌ قبلاً برگشت خورد.", ADMIN_KB()); return
-        tp = get_player(txn["target_id"])
-        if not tp:
-            send_message(chat_id, "❌ کاربر نیست.", ADMIN_KB()); return
-        update_player(txn["target_id"], money=tp["money"] - txn["amount"])
-        c.execute(f"UPDATE admin_txns SET reversed=1 WHERE id={ph()}", (txn_id,))
-        conn.commit()
-    finally: close(conn)
-    send_message(chat_id, f"✅ برگشت خورد.", ADMIN_KB(), safe=False)
-
-
-def do_reset_all(uid, chat_id):
-    if not is_admin(uid): return
-    conn = db()
-    try:
-        c = conn.cursor()
-        for t in ["players", "achievements", "transactions", "shop_orders", "clans", "clan_members",
-                  "duels", "daily_missions", "admin_txns", "banks", "user_states",
-                  "casino_log", "card_transfers", "discount_codes", "boosters", "reminders",
-                  "lottery", "lottery_winners", "daily_events", "gems_log", "badges",
-                  "referrals", "season_scores", "season_winners"]:
-            try: c.execute(f"DELETE FROM {t}")
-            except: pass
-        conn.commit()
-    finally: close(conn)
-    send_message(chat_id, "✅ *ریست کلی انجام شد!*", ADMIN_KB(), safe=False)
-
-
-def do_redeem_code(uid, chat_id, code):
-    code = code.strip().upper()
-    if not code:
-        send_message(chat_id, "مثال: `کد WELCOME`"); return
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT * FROM discount_codes WHERE code={ph()}", (code,))
-        r = c.fetchone()
-        if not r:
-            send_message(chat_id, "❌ کد نیست!"); return
-        d = dict(r)
-        if d["uses"] >= d["max_uses"]:
-            send_message(chat_id, "❌ ظرفیت پر!"); return
-        try: used = json.loads(d["used_by"] or "[]")
-        except: used = []
-        if uid in used:
-            send_message(chat_id, "❌ استفاده کردی!"); return
-        p = get_player(uid)
-        amount = d["amount"] or 0
-        update_player(uid, money=p["money"] + amount)
-        used.append(uid)
-        c.execute(f"UPDATE discount_codes SET uses=uses+1, used_by={ph()} WHERE code={ph()}",
-                  (json.dumps(used), code))
-        conn.commit()
-    finally: close(conn)
-    send_message(chat_id, f"✅ کد فعال!\n💰 +{format_money(amount)}")
-
-
-def do_admin_create_code(uid, chat_id, code, amount, max_uses=1):
-    if not is_admin(uid): return
-    code = code.strip().upper()
-    if not code or amount <= 0 or amount > 100000:
-        send_message(chat_id, "فرمت: `کد بساز WELCOME 5000 10`"); return
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT code FROM discount_codes WHERE code={ph()}", (code,))
-        if c.fetchone():
-            send_message(chat_id, f"❌ وجود داره.", ADMIN_KB(), safe=False); return
-        c.execute(f"INSERT INTO discount_codes (code, amount, max_uses, created_by, created_at, used_by) VALUES ({ph()},{ph()},{ph()},{ph()},{ph()},'[]')",
-                  (code, amount, max_uses, uid, time.time()))
-        conn.commit()
-    finally: close(conn)
-    send_message(chat_id, f"✅ کد `{code}` ساخته شد!", ADMIN_KB(), safe=False)
-
-
-def do_admin_list_codes(uid, chat_id):
-    if not is_admin(uid): return
-    conn = db()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT * FROM discount_codes ORDER BY created_at DESC LIMIT 15")
-        rows = c.fetchall()
-    finally: close(conn)
-    if not rows:
-        send_message(chat_id, "🎟 کدی نیست.", ADMIN_KB()); return
-    txt = "🎟 *کدها*\n"
-    for r in rows:
-        txt += f"• `{r['code']}` — {format_money(r['amount'])} ({r['uses']}/{r['max_uses']})\n"
-    send_message(chat_id, txt, ADMIN_KB(), safe=False)
-
-
-# ==================== Private Handler ====================
-def handle_private(msg, uid, chat_id, first_name, username, text):
-    if text == "/start":
-        clear_join_cache(uid)
-    if text == "/cancel":
-        clear_state(uid)
-        send_message(chat_id, "✅ لغو شد.", PRIVATE_KB(uid)); return
-    if text == "/check":
-        clear_join_cache(uid)
-        if is_joined(uid, use_cache=False):
-            send_message(chat_id, "✅ تایید شد!", PRIVATE_KB(uid))
-        else:
-            send_join_pm(uid, first_name, force=True)
-        return
-    if not is_joined(uid):
-        send_join_pm(uid, first_name, force=(text == "/start"))
-        return
-
-    if not get_player(uid):
-        create_player(uid, first_name, username)
-    p = get_player(uid)
-
-    if text.startswith("/start"):
-        parts = text.split()
-        if len(parts) > 1 and parts[1].startswith("ref_"):
-            try:
-                referrer_id = int(parts[1].replace("ref_", ""))
-                process_referral(uid, chat_id, referrer_id)
-            except: pass
-        check_badge(uid, chat_id, "first_step")
-
-    if text == "/myid":
-        send_message(chat_id, f"🆔 `{uid}`", PRIVATE_KB(uid), safe=False); return
-    if text == "/version":
-        send_message(chat_id, f"📦 `{VERSION}`\n🗄 {'PostgreSQL' if USE_POSTGRES else 'SQLite'}", PRIVATE_KB(uid), safe=False); return
-
-    if text in ("/admin", "/panel", "👑 پنل ادمین"):
-        if is_admin(uid):
-            show_admin_panel(chat_id, uid)
-        else:
-            send_message(chat_id, f"⛔ ادمین نیستی.\nآیدی تو: `{uid}`\nآیدی‌های ادمین: `{ADMIN_IDS}`", safe=False)
-        return
-
-    if text == "/start":
-        event_line = ""
-        if get_today_event() != "normal":
-            event_line = f"\n\n{get_today_event_desc()}"
-        send_message(chat_id,
-                     f"🍔 سلام {first_name}!\n━━━━━━━━━━━━━━━\n"
-                     f"خوش اومدی به ربات *فلافل فروشی*!{event_line}\n\n"
-                     f"🎮 بازی: من رو به گروه اضافه کن و `/game` بزن!\n\n"
-                     f"🆕 *قابلیت‌های جدید نسخه {VERSION}:*\n"
-                     f"💎 VIP، 🛍 فروشگاه، 👥 دعوت، 🏅 نشان‌ها، 💼 کار\n\n"
-                     f"از منوی پایین شروع کن 👇",
-                     PRIVATE_KB(uid), safe=False)
-        return
-
-    if text == "/help" or text == "📖 راهنما":
-        send_message(chat_id,
-                     "📖 *راهنما*\n"
-                     "🎮 بازی توی گروه: `/game`\n"
-                     "🛍 فروشگاه، 💎 VIP، 👥 دعوت\n"
-                     "📋 دستورات کامل: توی گروه `راهنما`", PRIVATE_KB(uid), safe=False)
-        return
-
-    if text in ("🏦 بانک", "/bank"): do_bank(uid, chat_id, first_name); return
-    if text == "📊 راهنما":
-        send_message(chat_id,
-                     "📊 *راهنمای بانک*\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n"
-                     "`بانک سرمایه ۵۰۰۰`\n`بانک پایان ۵۰۰۰`\n`بانک جمع`\n\n📊 سود: ۲۰٪ روزانه",
-                     BANK_KB(), safe=False)
-        return
-    if text == "🎰 کازینو":
-        send_message(chat_id, "🎰 `کازینو ۵۰۰۰ شیر` / `خط`", PRIVATE_KB(uid)); return
-    if text == "🎰 اسلات":
-        send_message(chat_id, "🎰 `اسلات ۵۰۰۰` — ۳ ریل، شانس جکپات!", PRIVATE_KB(uid)); return
-    if text == "🎁 جعبه": do_mystery_box(uid, chat_id); return
-    if text == "⚡ بوستر": do_booster(uid, chat_id); return
-    if text == "🎫 لاتاری": do_lottery_panel(uid, chat_id); return
-    if text == "🎓 مهارت‌ها": do_skills_panel(uid, chat_id); return
-    if text == "🐔 پت": do_pet_panel(uid, chat_id); return
-    if text == "💎 الماس": do_gem_shop(uid, chat_id); return
-    if text == "💎 VIP": vip_panel(uid, chat_id); return
-    if text == "👥 دعوت": referral_panel(uid, chat_id); return
-    if text == "🏅 نشان‌ها": badges_panel(uid, chat_id); return
-    if text == "💼 کار": do_work(uid, chat_id); return
-    if text == "🛍 فروشگاه": shop_panel(uid, chat_id); return
-    if text == "🔔 یادآور":
-        send_message(chat_id, "🔔 `یادآور ۱۰m جلسه` | `یادآور لیست`", PRIVATE_KB(uid)); return
-    if text == "💳 کارت به کارت":
-        send_message(chat_id,
-                     "💳 *کارت به کارت*\n"
-                     "روش ۱: `کارت به کارت ID مبلغ`\n"
-                     "روش ۲: روی پیام کاربر ریپلای کن و بنویس `انتقال ۵۰۰۰`\n\n"
-                     "💸 کمیسیون ۲٪ | بین ۵۰۰ تا ۵۰,۰۰۰",
-                     PRIVATE_KB(uid), safe=False)
-        return
-    if text in ("👤 پروفایل من", "/profile"): do_profile(uid, chat_id, first_name); return
-    if text == "💳 خریدهای من":
-        conn = db()
-        try:
-            c = conn.cursor()
-            c.execute(f"SELECT id, package_key, price, status FROM shop_orders WHERE user_id={ph()} ORDER BY created_at DESC LIMIT 10", (uid,))
-            rows = c.fetchall()
-        finally: close(conn)
-        if not rows:
-            send_message(chat_id, "هنوز سفارشی نداری.", PRIVATE_KB(uid)); return
-        statuses = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
-        txt = "💳 *سفارش‌ها*\n"
-        for r in rows:
-            pkg = SHOP_PACKAGES.get(r["package_key"], {"name": r["package_key"]})
-            txt += f"• {pkg['name']} — {statuses.get(r['status'], r['status'])}\n"
-        send_message(chat_id, txt, PRIVATE_KB(uid), safe=False)
-        return
-    if text == "🔙 بازگشت":
-        send_message(chat_id, "منوی اصلی:", PRIVATE_KB(uid)); return
-
-    if is_admin(uid) and handle_admin_text(chat_id, uid, text):
-        return
-
-    state, data = get_state(uid)
-    if state and handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
-        return
-
-    if "\n" in text:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        if len(lines) >= 2:
-            handled = 0
-            for line in lines:
-                if parse_text_command(uid, chat_id, first_name, username, line):
-                    handled += 1
-            if handled >= 2:
-                return
-
-    if parse_text_command(uid, chat_id, first_name, username, text):
-        return
-
-    send_message(chat_id, "از منوی پایین استفاده کن 👇", PRIVATE_KB(uid))
-
-
-# ==================== Show Admin Panel ====================
+# ═══════════════════════════════════════════════════════════
+#   👑 پنل ادمین (نمایش)
+# ═══════════════════════════════════════════════════════════
 def show_admin_panel(chat_id, uid):
     conn = db()
     try:
@@ -2660,11 +2995,15 @@ def show_admin_panel(chat_id, uid):
         c.execute("SELECT COUNT(*) c FROM players")
         tp = c.fetchone()["c"]
         c.execute("SELECT SUM(money) s FROM players")
-        total_money = c.fetchone()["s"] or 0
+        row = c.fetchone()
+        total_money = (row["s"] if row else 0) or 0
         c.execute("SELECT SUM(total_earned) s FROM players")
-        total_earned = c.fetchone()["s"] or 0
+        row = c.fetchone()
+        total_earned = (row["s"] if row else 0) or 0
         c.execute(f"SELECT COUNT(*) c FROM players WHERE vip_level != {ph()}", ("none",))
         vips = c.fetchone()["c"]
+        c.execute("SELECT COUNT(*) c FROM user_purchases")
+        purchases = c.fetchone()["c"]
     finally: close(conn)
     send_message(chat_id,
                  f"👑 *پنل ادمین* ({'PostgreSQL' if USE_POSTGRES else 'SQLite'})\n"
@@ -2672,16 +3011,18 @@ def show_admin_panel(chat_id, uid):
                  f"📥 سفارشات: {pending}\n"
                  f"👥 بازیکن‌ها: {tp}\n"
                  f"💎 VIP: {vips}\n"
+                 f"💳 خریدهای دستی: {purchases}\n"
                  f"💰 مجموع پول: {format_money(total_money)}\n"
                  f"📈 مجموع درآمد: {format_money(total_earned)}\n\n"
                  f"💡 *دستورات:*\n"
-                 f"`ADDMONEY ID مبلغ` — افزودن پول\n"
-                 f"`CARD ID مبلغ` — کارت به کارت\n"
-                 f"`SUB ID مبلغ` — کم کردن\n"
-                 f"`RESET ID` | `RESETALL`\n"
+                 f"`ADDMONEY ID مبلغ` — افزودن پول (بدون سقف)\n"
+                 f"`REMOVE ID مبلغ` — کم کردن پول\n"
+                 f"`ACTIVATE ID package_key` — فعال‌سازی پکیج\n"
+                 f"`PAID ID` — خریدهای کاربر\n"
+                 f"`INFO ID` — اطلاعات کامل کاربر\n"
+                 f"`SEARCH نام` | `UNDO ID` | `RESET ID` | `RESETALL`\n"
                  f"`ALL متن` | `GIFT مبلغ`\n"
-                 f"`کد بساز CODE مبلغ تعداد` | `کد لیست`\n"
-                 f"`SEARCH نام` | `ADMINLOG ID` | `UNDO ID`",
+                 f"`کد بساز CODE مبلغ تعداد` | `کد لیست`",
                  ADMIN_KB(), safe=False)
 
 
@@ -2691,6 +3032,7 @@ def show_pending_orders(chat_id, uid):
         c = conn.cursor()
         c.execute(f"SELECT * FROM shop_orders WHERE status={ph()} ORDER BY created_at DESC LIMIT 10", ("pending",))
         rows = c.fetchall()
+    except: rows = []
     finally: close(conn)
     if not rows:
         send_message(chat_id, "📥 سفارشی نیست.", ADMIN_KB()); return
@@ -2767,7 +3109,135 @@ def notify_admins_order(order, uid, first_name):
             send_message(adm, txt, ikb, safe=False)
 
 
-# ==================== Group Handler ====================
+# ═══════════════════════════════════════════════════════════
+#   🎯 هندلر پیوی
+# ═══════════════════════════════════════════════════════════
+def handle_private(msg, uid, chat_id, first_name, username, text):
+    if text == "/start":
+        clear_join_cache(uid)
+    if text == "/cancel":
+        clear_state(uid)
+        send_message(chat_id, "✅ لغو شد.", PRIVATE_KB(uid)); return
+    if text == "/check":
+        clear_join_cache(uid)
+        if is_joined(uid, use_cache=False):
+            send_message(chat_id, "✅ تایید شد!", PRIVATE_KB(uid))
+        else:
+            send_join_pm(uid, first_name, force=True)
+        return
+    if not is_joined(uid):
+        send_join_pm(uid, first_name, force=(text == "/start"))
+        return
+
+    if not get_player(uid):
+        create_player(uid, first_name, username)
+    p = get_player(uid)
+
+    if text.startswith("/start"):
+        parts = text.split()
+        if len(parts) > 1 and parts[1].startswith("ref_"):
+            try:
+                referrer_id = int(parts[1].replace("ref_", ""))
+                process_referral(uid, chat_id, referrer_id)
+            except: pass
+        check_badge(uid, chat_id, "first_step")
+
+    if text == "/myid":
+        send_message(chat_id, f"🆔 `{uid}`", PRIVATE_KB(uid), safe=False); return
+    if text == "/version":
+        send_message(chat_id, f"📦 `{VERSION}`\n🗄 {'PostgreSQL' if USE_POSTGRES else 'SQLite'}", PRIVATE_KB(uid), safe=False); return
+
+    if text in ("/admin", "/panel", "👑 پنل ادمین"):
+        if is_admin(uid):
+            show_admin_panel(chat_id, uid)
+        else:
+            send_message(chat_id, f"⛔ ادمین نیستی.\nآیدی تو: `{uid}`", safe=False)
+        return
+
+    if text == "/start":
+        event_line = ""
+        if get_today_event() != "normal":
+            event_line = f"\n\n{get_today_event_desc()}"
+        send_message(chat_id,
+                     f"🍔 سلام {first_name}!\n━━━━━━━━━━━━━━━\n"
+                     f"خوش اومدی به ربات *فلافل فروشی*!{event_line}\n\n"
+                     f"🎮 بازی: من رو به گروه اضافه کن و `/game` بزن!\n\n"
+                     f"🆕 *قابلیت‌های نسخه {VERSION}:*\n"
+                     f"🍕 پیتزا، 🍔 همبرگر، 🌭 هات‌داگ، 🥗 سالاد\n"
+                     f"💎 VIP، 🛍 فروشگاه، 👥 دعوت، 💼 کار\n\n"
+                     f"از منوی پایین شروع کن 👇",
+                     PRIVATE_KB(uid), safe=False)
+        return
+
+    if text == "/help" or text == "📖 راهنما":
+        send_message(chat_id,
+                     "📖 *راهنما*\n"
+                     "🎮 بازی توی گروه: `/game`\n"
+                     "🛍 فروشگاه، 💎 VIP، 👥 دعوت\n"
+                     "📋 دستورات کامل: توی گروه `راهنما`", PRIVATE_KB(uid), safe=False)
+        return
+
+    if text in ("🏦 بانک", "/bank"): do_bank(uid, chat_id, first_name); return
+    if text == "📊 راهنما":
+        send_message(chat_id,
+                     "📊 *راهنمای بانک*\n`بانک واریز ۵۰۰۰`\n`بانک برداشت ۵۰۰۰`\n"
+                     "`بانک سرمایه ۵۰۰۰`\n`بانک پایان ۵۰۰۰`\n`بانک جمع`\n\n📊 سود: ۲۰٪ روزانه",
+                     BANK_KB(), safe=False)
+        return
+    if text == "🎰 کازینو":
+        send_message(chat_id, "🎰 `کازینو ۵۰۰۰ شیر` / `خط`", PRIVATE_KB(uid)); return
+    if text == "🎰 اسلات":
+        send_message(chat_id, "🎰 `اسلات ۵۰۰۰` — ۳ ریل، شانس جکپات!", PRIVATE_KB(uid)); return
+    if text == "🎁 جعبه": do_mystery_box(uid, chat_id); return
+    if text == "⚡ بوستر": do_booster(uid, chat_id); return
+    if text == "🎫 لاتاری": do_lottery_panel(uid, chat_id); return
+    if text == "🎓 مهارت‌ها": do_skills_panel(uid, chat_id); return
+    if text == "🐔 پت": do_pet_panel(uid, chat_id); return
+    if text == "💎 الماس": do_gem_shop(uid, chat_id); return
+    if text == "💎 VIP": vip_panel(uid, chat_id); return
+    if text == "👥 دعوت": referral_panel(uid, chat_id); return
+    if text == "🏅 نشان‌ها": badges_panel(uid, chat_id); return
+    if text == "💼 کار": do_work(uid, chat_id); return
+    if text == "🛍 فروشگاه": shop_panel(uid, chat_id); return
+    if text == "💳 کارت به کارت":
+        send_message(chat_id,
+                     "💳 *کارت به کارت*\n"
+                     "روش ۱: `کارت به کارت ID مبلغ`\n"
+                     "روش ۲: روی پیام کاربر ریپلای کن و بنویس `انتقال ۵۰۰۰`\n\n"
+                     "💸 کمیسیون ۲٪ | بین ۵۰۰ تا ۵۰,۰۰۰",
+                     PRIVATE_KB(uid), safe=False)
+        return
+    if text in ("👤 پروفایل من", "/profile"): do_profile(uid, chat_id, first_name); return
+    if text == "💳 خریدهای من": do_my_purchases(uid, chat_id); return
+    if text == "🔙 بازگشت":
+        send_message(chat_id, "منوی اصلی:", PRIVATE_KB(uid)); return
+
+    if is_admin(uid) and handle_admin_text(chat_id, uid, text):
+        return
+
+    state, data = get_state(uid)
+    if state and handle_shop_state(chat_id, uid, first_name, text, msg, state, data):
+        return
+
+    if "\n" in text:
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        if len(lines) >= 2:
+            handled = 0
+            for line in lines:
+                if parse_text_command(uid, chat_id, first_name, username, line):
+                    handled += 1
+            if handled >= 2:
+                return
+
+    if parse_text_command(uid, chat_id, first_name, username, text):
+        return
+
+    send_message(chat_id, "از منوی پایین استفاده کن 👇", PRIVATE_KB(uid))
+
+
+# ═══════════════════════════════════════════════════════════
+#   🎯 هندلر گروه
+# ═══════════════════════════════════════════════════════════
 def handle_group(msg, uid, chat_id, first_name, username, text):
     if not is_joined(uid):
         send_join_pm(uid, first_name)
@@ -2778,14 +3248,12 @@ def handle_group(msg, uid, chat_id, first_name, username, text):
         p = get_player(uid)
         send_message(chat_id,
                      f"🎮 *منوی فلافل*\n💰 {format_money(p['money'])} | ⭐ {p['level']}\n"
-                     f"🍽 {count_falafel(p)} فلافل\n\nروی دکمه بزن 👇",
+                     f"🍽 {count_all_food(p)} غذا\n\nروی دکمه بزن 👇",
                      GROUP_KB(), safe=False)
         return
     if text.startswith("/"):
         if text == "/version":
             send_message(chat_id, f"📦 `{VERSION}`", safe=False); return
-        if text == "/help":
-            send_message(chat_id, "📋 `راهنما` رو بزن.", safe=False); return
         return
 
     if text.startswith("دوئل") or text.startswith("مبارزه"):
@@ -2804,7 +3272,7 @@ def handle_group(msg, uid, chat_id, first_name, username, text):
         reply = msg.get("reply_to_message")
         nums = re.findall(r'\d+', normalize_numbers(text))
         if not nums:
-            send_message(chat_id, "❌ مبلغ رو بنویس (مثال: `انتقال ۵۰۰۰`)"); return
+            send_message(chat_id, "❌ مبلغ رو بنویس"); return
         amount = int(nums[0])
         if reply:
             target_id = (reply.get("from") or {}).get("id")
@@ -2823,7 +3291,9 @@ def handle_group(msg, uid, chat_id, first_name, username, text):
         return
 
 
-# ==================== Callback ====================
+# ═══════════════════════════════════════════════════════════
+#   🎯 هندلر Callback
+# ═══════════════════════════════════════════════════════════
 def handle_callback(cb):
     data = cb.get("data") or ""
     msg = cb.get("message") or {}
@@ -2866,9 +3336,15 @@ def handle_callback(cb):
             conn.commit()
         finally: close(conn)
         if is_appr:
-            try: send_message(order["user_id"], f"✅ سفارش #{oid} تایید شد!\nپیوی مالک برای تحویل: {OWNER_USERNAME}", PRIVATE_KB(order["user_id"]), safe=False)
-            except: pass
-            answer_callback(cb["id"], "✅ تایید", True)
+            # 🆕 فعال‌سازی خودکار پکیج موقع تایید
+            try:
+                do_admin_activate_package(uid, m_chat, order["user_id"], order["package_key"])
+                send_message(order["user_id"], f"✅ سفارش #{oid} تایید و فعال شد!", PRIVATE_KB(order["user_id"]), safe=False)
+            except Exception as e:
+                log(f"⚠️ auto activate: {e}")
+                try: send_message(order["user_id"], f"✅ سفارش #{oid} تایید شد!\nپیوی مالک: {OWNER_USERNAME}", PRIVATE_KB(order["user_id"]), safe=False)
+                except: pass
+            answer_callback(cb["id"], "✅ تایید و فعال شد", True)
         else:
             try: send_message(order["user_id"], f"❌ سفارش #{oid} رد شد.")
             except: pass
@@ -2876,40 +3352,6 @@ def handle_callback(cb):
         try: api("deleteMessage", {"chat_id": m_chat, "message_id": m_id})
         except: pass
         return
-
-    if data.startswith("g:"):
-        if not is_joined(uid):
-            send_join_pm(uid, fn)
-            answer_callback(cb["id"], "🔒 اول عضو شو", True); return
-        if not get_player(uid):
-            create_player(uid, fn, un)
-        sub = data.split(":")[1]
-        if sub == "close":
-            try: api("deleteMessage", {"chat_id": m_chat, "message_id": m_id})
-            except: pass
-            answer_callback(cb["id"]); return
-        if sub == "mission":
-            answer_callback(cb["id"]); do_missions(uid, m_chat); return
-        if sub == "clan":
-            answer_callback(cb["id"]); do_clan_info(uid, m_chat); return
-        if sub == "bank":
-            answer_callback(cb["id"]); do_bank(uid, m_chat, fn); return
-        if sub == "lottery":
-            answer_callback(cb["id"]); do_lottery_panel(uid, m_chat); return
-        if sub == "casino":
-            answer_callback(cb["id"])
-            send_message(m_chat, "🎰 `کازینو ۵۰۰۰ شیر` / `خط`", safe=False); return
-        if sub == "slot":
-            answer_callback(cb["id"])
-            send_message(m_chat, "🎰 `اسلات ۵۰۰۰`", safe=False); return
-        if sub == "boost":
-            answer_callback(cb["id"])
-            send_message(m_chat, "⚡ `بوستر بخر` — ۵,۰۰۰", safe=False); return
-        if sub == "shop":
-            answer_callback(cb["id"]); shop_panel(uid, m_chat); return
-        if sub in GUIDES:
-            answer_callback(cb["id"]); send_message(m_chat, GUIDES[sub], safe=False); return
-        answer_callback(cb["id"]); return
 
     if data.startswith("shop:"):
         if not is_joined(uid):
@@ -2936,10 +3378,35 @@ def handle_callback(cb):
         send_message(uid, "لغو شد.", PRIVATE_KB(uid))
         return
 
+    if data.startswith("g:"):
+        if not is_joined(uid):
+            send_join_pm(uid, fn)
+            answer_callback(cb["id"], "🔒 اول عضو شو", True); return
+        if not get_player(uid):
+            create_player(uid, fn, un)
+        sub = data.split(":")[1]
+        if sub == "close":
+            try: api("deleteMessage", {"chat_id": m_chat, "message_id": m_id})
+            except: pass
+            answer_callback(cb["id"]); return
+        if sub == "mission":
+            answer_callback(cb["id"]); do_missions(uid, m_chat); return
+        if sub == "clan":
+            answer_callback(cb["id"]); do_clan_info(uid, m_chat); return
+        if sub == "bank":
+            answer_callback(cb["id"]); do_bank(uid, m_chat, fn); return
+        if sub == "shop":
+            answer_callback(cb["id"]); shop_panel(uid, m_chat); return
+        if sub in GUIDES:
+            answer_callback(cb["id"]); send_message(m_chat, GUIDES[sub], safe=False); return
+        answer_callback(cb["id"]); return
+
     answer_callback(cb["id"])
 
 
-# ==================== Helpers ====================
+# ═══════════════════════════════════════════════════════════
+#   🔧 Helpers
+# ═══════════════════════════════════════════════════════════
 def is_message_too_old(msg, max_age=MAX_MESSAGE_AGE):
     msg_date = msg.get("date")
     if not msg_date: return False
@@ -2988,6 +3455,9 @@ def process_update(update):
     except Exception: log_err()
 
 
+# ═══════════════════════════════════════════════════════════
+#   🔄 Background Tasks
+# ═══════════════════════════════════════════════════════════
 def background_tasks():
     try:
         conn = db()
@@ -3019,6 +3489,9 @@ def background_tasks():
     except Exception: log_err()
 
 
+# ═══════════════════════════════════════════════════════════
+#   🚀 Main
+# ═══════════════════════════════════════════════════════════
 def run():
     init_db()
     print("━" * 55, flush=True)
@@ -3057,4 +3530,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()  
+    run()
