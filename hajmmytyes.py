@@ -81,6 +81,16 @@ MAX_MESSAGE_AGE = 120
 
 ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", "")
 ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()]
+
+print("✅ تنظیمات امنیتی تایید شد")
+FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "")
+FORCED_CHANNEL_TITLE = os.environ.get("FORCED_CHANNEL_TITLE", "")
+
+FORCED_CHANNEL_NORM = None
+_join_cache = {}
+JOIN_CACHE_TTL = 300
+_join_pm_sent = {}
+JOIN_PM_COOLDOWN = 300
 # ==================== چک امنیتی ====================
 if not TOKEN:
     print("❌ خطا: BOT_TOKEN توی Env Vars ست نشده!")
@@ -93,16 +103,6 @@ if not ADMIN_IDS:
 if not FORCED_CHANNEL:
     print("❌ خطا: FORCED_CHANNEL توی Env Vars ست نشده!")
     sys.exit(1)
-
-print("✅ تنظیمات امنیتی تایید شد")
-FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "")
-FORCED_CHANNEL_TITLE = os.environ.get("FORCED_CHANNEL_TITLE", "")
-
-FORCED_CHANNEL_NORM = None
-_join_cache = {}
-JOIN_CACHE_TTL = 300
-_join_pm_sent = {}
-JOIN_PM_COOLDOWN = 300
 
 CARD_NUMBER = os.environ.get("CARD_NUMBER", "6037-XXXX-XXXX-XXXX")
 CARD_OWNER = os.environ.get("CARD_OWNER", "نام صاحب کارت")
